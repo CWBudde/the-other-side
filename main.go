@@ -35,6 +35,7 @@ type options struct {
 	compare       string
 	bench         time.Duration
 	bundle        string
+	bufA          string // Buffer A shader: "auto", "none" or a path
 }
 
 func main() {
@@ -66,7 +67,10 @@ func parseFlags() (*options, error) {
 	flag.StringVar(&opt.compare, "compare", "",
 		"with -shot: also write <shot>_cmp.png montage against this reference image")
 	flag.DurationVar(&opt.bench, "bench", 0, "render offscreen for this long and report ms/frame, e.g. 3s")
-	flag.StringVar(&opt.bundle, "bundle", "", "write a single self-contained Shadertoy-pasteable file")
+	flag.StringVar(&opt.bundle, "bundle", "",
+		"write the Shadertoy-pasteable Image pass to this file (and Buffer A to buffer_a.glsl beside it)")
+	flag.StringVar(&opt.bufA, "bufa", "auto",
+		`Buffer A shader feeding iChannel0 ("auto" = buffer_a.glsl beside -shader if present, "none")`)
 	flag.Parse()
 
 	_, err := fmt.Sscanf(strings.ToLower(*size), "%dx%d", &opt.width, &opt.height)
@@ -172,22 +176,41 @@ func run(opt *options) error {
 	}
 }
 
-// writeBundle writes the single-file Shadertoy export to opt.bundle.
+// writeBundle writes the Shadertoy export: the Image pass to opt.bundle and,
+// with a Buffer A, that pass to buffer_a.glsl in the same directory (where
+// -shader opt.bundle picks it up again).
 func writeBundle(opt *options) error {
-	body, err := loadShader(opt.shader)
+	bufPath := bufferPath(opt)
+	imageNote := "Paste into Shadertoy's Image tab."
+
+	if bufPath != "" {
+		imageNote += " Set its iChannel0 to Buffer A, filter mipmap, wrap clamp."
+
+		err := writePass(filepath.Join(filepath.Dir(opt.bundle), bufferFile), bufPath, opt.defines,
+			"Paste into Shadertoy's Buffer A tab.")
+		if err != nil {
+			return err
+		}
+	}
+
+	return writePass(opt.bundle, opt.shader, opt.defines, imageNote)
+}
+
+func writePass(out, shaderPath string, defs defineList, note string) error {
+	body, err := loadShader(shaderPath)
 	if err != nil {
 		return err
 	}
 
-	err = writeOutput(opt.bundle, func(w io.Writer) error {
-		_, err := io.WriteString(w, bundle(body, opt.defines, opt.shader))
+	err = writeOutput(out, func(w io.Writer) error {
+		_, err := io.WriteString(w, bundle(body, defs, shaderPath, note))
 		return err
 	})
 	if err != nil {
 		return err
 	}
 
-	fmt.Println("wrote", opt.bundle)
+	fmt.Println("wrote", out)
 
 	return nil
 }
@@ -226,17 +249,6 @@ func initGL(opt *options, visible bool) (*glfw.Window, error) {
 	return window, nil
 }
 
-func loadProgram(opt *options) (*program, *source, error) {
-	body, err := loadShader(opt.shader)
-	if err != nil {
-		return nil, body, err
-	}
-
-	prog, err := buildProgram(body, opt.defines)
-
-	return prog, body, err
-}
-
 // fixedUniforms returns deterministic inputs for offscreen frames at time t.
 func fixedUniforms(opt *options, t float64) frameUniforms {
 	return frameUniforms{
@@ -248,11 +260,11 @@ func fixedUniforms(opt *options, t float64) frameUniforms {
 }
 
 func runShot(opt *options, screen *quad) error {
-	prog, _, err := loadProgram(opt)
+	pipe, _, err := loadPipeline(opt)
 	if err != nil {
 		return err
 	}
-	defer prog.delete()
+	defer pipe.delete()
 
 	target, err := newFBO(opt.width, opt.height)
 	if err != nil {
@@ -271,10 +283,14 @@ func runShot(opt *options, screen *quad) error {
 	for i, t := range opt.times {
 		path := shotPath(opt, i, t)
 
-		screen.draw(prog, fixedUniforms(opt, t))
+		err := pipe.draw(screen, fixedUniforms(opt, t))
+		if err != nil {
+			return err
+		}
+
 		gl.Finish()
 
-		err := writeShot(path, readPixels(opt.width, opt.height), ref, opt.frames == 0)
+		err = writeShot(path, readPixels(opt.width, opt.height), ref, opt.frames == 0)
 		if err != nil {
 			return err
 		}
@@ -315,11 +331,11 @@ func writeShot(path string, img *image.RGBA, ref image.Image, verbose bool) erro
 }
 
 func runBench(opt *options, screen *quad) error {
-	prog, _, err := loadProgram(opt)
+	pipe, _, err := loadPipeline(opt)
 	if err != nil {
 		return err
 	}
-	defer prog.delete()
+	defer pipe.delete()
 
 	target, err := newFBO(opt.width, opt.height)
 	if err != nil {
@@ -328,7 +344,10 @@ func runBench(opt *options, screen *quad) error {
 	defer target.delete()
 
 	for i := range 10 { // warm-up: shader compilation is often lazy
-		screen.draw(prog, fixedUniforms(opt, float64(i)/60))
+		err := pipe.draw(screen, fixedUniforms(opt, float64(i)/60))
+		if err != nil {
+			return err
+		}
 	}
 
 	gl.Finish()
@@ -337,7 +356,11 @@ func runBench(opt *options, screen *quad) error {
 	frames := 0
 
 	for time.Since(start) < opt.bench {
-		screen.draw(prog, fixedUniforms(opt, time.Since(start).Seconds()))
+		err := pipe.draw(screen, fixedUniforms(opt, time.Since(start).Seconds()))
+		if err != nil {
+			return err
+		}
+
 		gl.Finish()
 
 		frames++
@@ -429,12 +452,10 @@ func (in *windowInput) attach(window *glfw.Window) {
 func runWindow(opt *options, window *glfw.Window, screen *quad) {
 	glfw.SwapInterval(1)
 
-	prog, body, err := loadProgram(opt)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-	}
+	pipe, files, err := loadPipeline(opt)
+	logError(err)
 
-	watch := newWatcher(body.files)
+	watch := newWatcher(files)
 
 	var (
 		input     windowInput
@@ -459,11 +480,11 @@ func runWindow(opt *options, window *glfw.Window, screen *quad) {
 
 		if now-lastPoll >= 0.25 {
 			lastPoll = now
-			prog = reloadProgram(opt, watch, prog)
+			pipe = reloadPipeline(opt, watch, pipe)
 		}
 
 		fbWidth, fbHeight := window.GetFramebufferSize()
-		screen.draw(prog, liveUniforms(fbWidth, fbHeight, simTime, delta, frame, &input.mouse))
+		logError(pipe.draw(screen, liveUniforms(fbWidth, fbHeight, simTime, delta, frame, &input.mouse)))
 		input.mouse.clicked = false
 		frame++
 
@@ -483,26 +504,33 @@ func runWindow(opt *options, window *glfw.Window, screen *quad) {
 		glfw.PollEvents()
 	}
 
-	prog.delete()
+	pipe.delete()
 }
 
-// reloadProgram rebuilds the program when a watched file changed. If the new
-// version fails to build, the error is logged and prog stays in use.
-func reloadProgram(opt *options, watch *watcher, prog *program) *program {
+// logError prints err to stderr, if any; window mode keeps running.
+func logError(err error) {
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+	}
+}
+
+// reloadPipeline rebuilds the passes when a watched file changed. If the new
+// version fails to build, the error is logged and pipe stays in use.
+func reloadPipeline(opt *options, watch *watcher, pipe *pipeline) *pipeline {
 	if !watch.changed() {
-		return prog
+		return pipe
 	}
 
-	next, body, err := loadProgram(opt)
-	watch.add(body.files)
+	next, files, err := loadPipeline(opt)
+	watch.add(files)
 
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "[%s] reload failed, keeping previous program:\n%v\n", time.Now().Format("15:04:05"), err)
 
-		return prog
+		return pipe
 	}
 
-	prog.delete()
+	pipe.delete()
 
 	fmt.Fprintf(os.Stderr, "[%s] reloaded %s\n", time.Now().Format("15:04:05"), opt.shader)
 

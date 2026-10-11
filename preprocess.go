@@ -185,12 +185,13 @@ func (s *source) remapLog(log string) string {
 	return strings.TrimRight(log, "\x00\n ")
 }
 
-// bundle produces a single self-contained Shadertoy-pasteable shader: the
-// defines as #define lines on top, followed by all includes inlined.
-func bundle(body *source, defs defineList, shaderPath string) string {
+// bundle produces one self-contained Shadertoy-pasteable pass: a header with
+// the note on where to paste it, the defines as #define lines, then all
+// includes inlined.
+func bundle(body *source, defs defineList, shaderPath, note string) string {
 	var buf strings.Builder
 
-	fmt.Fprintf(&buf, "// Bundled from %s by the-other-side runner. Paste into Shadertoy's Image tab.\n", shaderPath)
+	fmt.Fprintf(&buf, "// Bundled from %s by the-other-side runner. %s\n", shaderPath, note)
 
 	for _, d := range defs {
 		buf.WriteString(d.String())

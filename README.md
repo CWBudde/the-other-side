@@ -8,13 +8,18 @@ visualizer.
 The scene is written in Shadertoy form (`mainImage`) and split into include files.
 A small Go runner (go-gl 4.1 core + GLFW 3.3) renders it in a window with hot reload,
 renders deterministic screenshots and comparison montages, benchmarks it, and bundles
-everything into a single file that you can paste into Shadertoy.
+it into self-contained files that you can paste into Shadertoy.
+
+It runs as two passes, like a Shadertoy with a buffer: Buffer A (`buffer_a.glsl`)
+renders the scene in linear RGB, and the Image pass (`main.glsl`) blends in a soft glow
+built from Buffer A's mip chain, then tonemaps.
 
 ## Layout
 
 | Path                                                  | Content                                                               |
 | ----------------------------------------------------- | --------------------------------------------------------------------- |
-| `shaders/main.glsl`                                   | camera, layer composition (`skyFull`, `skyRefl`), post process        |
+| `shaders/buffer_a.glsl`                               | Buffer A: camera, layer composition (`skyFull`, `skyRefl`), linear    |
+| `shaders/main.glsl`                                   | Image pass: glow from Buffer A's mip chain, tonemap, vignette, grain  |
 | `shaders/common.glsl`                                 | framing constants, step counts, prototypes, hashes, noise             |
 | `shaders/sky.glsl`                                    | `skyBase`: gradient, horizon haze, twinkling star field               |
 | `shaders/aurora.glsl`                                 | `aurora`: nimitz's volumetric aurora with an arc band mask and motion |
@@ -50,7 +55,14 @@ go run -buildvcs=false . [flags]
 | `-frames N`, `-fps F` | with `-shot`: N frames from `-time` at F fps (default 30), named `OUT_00000.png`, ... |
 | `-compare REF.png`    | with `-shot`: also write `OUT_cmp.png` (render left, `REF.png` right)                 |
 | `-bench 3s`           | render offscreen for this long and print ms/frame                                     |
-| `-bundle OUT.glsl`    | write one self-contained Shadertoy file (includes inlined, defines applied)           |
+| `-bundle OUT.glsl`    | write the Image pass to OUT.glsl and Buffer A to `buffer_a.glsl` beside it            |
+| `-bufa FILE`          | Buffer A shader for iChannel0 (default `auto`: `buffer_a.glsl` beside `-shader`)      |
+
+Buffer A renders into a half-float texture with mipmaps, bound to iChannel0 of the
+Image pass (`-bufa none` runs the Image pass alone). To use the bundle on Shadertoy,
+paste `out/buffer_a.glsl` into a new Buffer A tab and `out/shadertoy.glsl` into the
+Image tab, then set the Image tab's iChannel0 to Buffer A with filter `mipmap` and wrap
+`clamp`.
 
 Window mode (no `-shot`/`-bench`/`-bundle`) reloads the shader when any included file
 changes. If the new version fails to compile, the error log is printed with `file:line`
@@ -85,7 +97,7 @@ go run -buildvcs=false . -bundle out/shadertoy.glsl
 
 With `VIEW=2`, `-D AUR_DEBUG=1` shows the arc masks (red = main arc, green = second
 arc) and `-D AUR_DEBUG_ALPHA=1` shows the aurora coverage. Other overridable defines:
-`EXPOSURE`, `AURORA_STEPS` (direct view, default 40) and `AURORA_STEPS_REFL` (water
+`EXPOSURE`, `GLOW_MIX` (softening glow, 0 = off), `AURORA_STEPS` (direct view, default 40) and `AURORA_STEPS_REFL` (water
 reflections, default 12). `-D METEOR_FORCE=1` puts a meteor in every 4 s slot, with
 its head mid-frame at t = 4k + 0.7, which helps when taking screenshots.
 
@@ -107,7 +119,7 @@ water reflections are not dimmed). The main dials for the animation: `STAR_TWINK
 | `just sheet [dir] [every] [grid] [crop] [width] [out]` | contact sheet of every n-th frame, for judging motion                     |
 | `just compare REF [times] [args]`                      | shots plus `_cmp` montages against `REF` (e.g. an earlier render)         |
 | `just bench [dur] [args]`                              | benchmark at 1280x720 and 1920x1080                                       |
-| `just bundle [args]`                                   | write `out/shadertoy.glsl` and render it back as a check                  |
+| `just bundle [args]`                                   | write `out/shadertoy.glsl` + `out/buffer_a.glsl`, render them as a check  |
 | `just setup-deps`                                      | install treefmt, prettier, gofumpt, gci, shfmt, golangci-lint             |
 | `just fmt`                                             | format with treefmt (`treefmt.toml`; GLSL is not formatted)               |
 | `just lint` / `just lint-fix`                          | golangci-lint with `.golangci.toml`                                       |
@@ -127,7 +139,7 @@ The aurora in `shaders/aurora.glsl` is derived from **"Auroras" by nimitz**
 (<https://www.shadertoy.com/view/XtGGRt>, twitter @stormoid), licensed under
 [Creative Commons Attribution-NonCommercial-ShareAlike 3.0 Unported](https://creativecommons.org/licenses/by-nc-sa/3.0/).
 The derived aurora shader inherits that licence (non-commercial, share alike), and so
-do the bundled `out/shadertoy.glsl` and any other build that contains it. nimitz's
+do the bundled `out/buffer_a.glsl` and any other build that contains it. nimitz's
 original header and notes are kept in the file.
 
 The hash functions in `common.glsl` follow Dave Hoskins' "Hash without Sine" (MIT).

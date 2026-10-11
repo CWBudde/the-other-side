@@ -19,8 +19,9 @@ in vec2 vert;
 void main() { gl_Position = vec4(vert, 0.0, 1.0); }
 `
 
-// fragmentPrefix declares the Shadertoy uniforms. Unbound iChannel samplers
-// read as black, so shaders that reference them still compile and run.
+// fragmentPrefix declares the Shadertoy uniforms. iChannelN samples texture
+// unit N; unbound units read as black, so shaders that reference them still
+// compile and run.
 const fragmentPrefix = `#version 410
 precision highp float;
 uniform vec3  iResolution;
@@ -55,12 +56,14 @@ type frameUniforms struct {
 	frame         int32
 	mouse         [4]float32
 	date          [4]float32
+	channel0      [2]int // size of the texture on iChannel0 (0 = none)
 }
 
 // program is a linked Shadertoy program plus its uniform locations.
 type program struct {
 	id                                         uint32
 	res, time, delta, rate, frame, mouse, date int32
+	chanRes                                    int32
 }
 
 func (p *program) delete() {
@@ -110,12 +113,13 @@ func buildProgram(body *source, defs defineList) (*program, error) {
 	prog := &program{
 		id: id, res: loc("iResolution"), time: loc("iTime"), delta: loc("iTimeDelta"),
 		rate: loc("iFrameRate"), frame: loc("iFrame"), mouse: loc("iMouse"), date: loc("iDate"),
+		chanRes: loc("iChannelResolution"),
 	}
-	// Point all channels at unit 0, where no texture is bound (reads black).
+	// Channel N samples texture unit N.
 	gl.UseProgram(id)
 
 	for i := range 4 {
-		gl.Uniform1i(loc(fmt.Sprintf("iChannel%d", i)), 0)
+		gl.Uniform1i(loc(fmt.Sprintf("iChannel%d", i)), int32(i))
 	}
 
 	gl.Uniform1f(loc("iSampleRate"), 44100)
@@ -196,24 +200,50 @@ func (q *quad) draw(prog *program, uni frameUniforms) {
 	gl.Uniform1i(prog.frame, uni.frame)
 	gl.Uniform4f(prog.mouse, uni.mouse[0], uni.mouse[1], uni.mouse[2], uni.mouse[3])
 	gl.Uniform4f(prog.date, uni.date[0], uni.date[1], uni.date[2], uni.date[3])
+
+	chanRes := [12]float32{float32(uni.channel0[0]), float32(uni.channel0[1]), 1}
+	gl.Uniform3fv(prog.chanRes, 4, &chanRes[0])
 	gl.BindVertexArray(q.vao)
 	gl.DrawArrays(gl.TRIANGLE_STRIP, 0, 4)
 	gl.BindVertexArray(0)
 }
 
-// fbo is an offscreen RGBA8 render target.
+// fbo is an offscreen render target: RGBA8 for shots, or half float with a
+// mip chain for buffer passes.
 type fbo struct {
 	id, tex       uint32
 	width, height int
 }
 
 func newFBO(w, h int) (*fbo, error) {
+	return newTarget(w, h, false)
+}
+
+// newBufferFBO returns a half-float target with linear, mipmapped sampling
+// and clamped edges, like a Shadertoy buffer with the "mipmap" filter. Call
+// gl.GenerateMipmap after rendering into it.
+func newBufferFBO(w, h int) (*fbo, error) {
+	return newTarget(w, h, true)
+}
+
+func newTarget(w, h int, float bool) (*fbo, error) {
 	target := &fbo{width: w, height: h}
 	gl.GenTextures(1, &target.tex)
 	gl.BindTexture(gl.TEXTURE_2D, target.tex)
-	gl.TexImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, glSize(w), glSize(h), 0, gl.RGBA, gl.UNSIGNED_BYTE, nil)
-	gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST)
-	gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST)
+
+	if float {
+		gl.TexImage2D(gl.TEXTURE_2D, 0, gl.RGBA16F, glSize(w), glSize(h), 0, gl.RGBA, gl.FLOAT, nil)
+		gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR)
+		gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR)
+		gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE)
+		gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE)
+		gl.GenerateMipmap(gl.TEXTURE_2D)
+	} else {
+		gl.TexImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, glSize(w), glSize(h), 0, gl.RGBA, gl.UNSIGNED_BYTE, nil)
+		gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST)
+		gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST)
+	}
+
 	gl.BindTexture(gl.TEXTURE_2D, 0)
 
 	gl.GenFramebuffers(1, &target.id)

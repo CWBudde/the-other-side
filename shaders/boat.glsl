@@ -62,7 +62,7 @@ const vec2  BOAT_BLADE      = vec2(0.55, 0.19); // blade length and greatest wid
 const vec3  BOAT_RIDE       = vec3(1.0, 0.85, 0.8); // heave, pitch, roll response (1 = follows the surface)
 const vec2  BOAT_PROBE      = vec2(1.45, 0.55);     // swell probes along and across the hull (m)
 // Lighting (linear radiance of the surroundings).
-const vec3  BOAT_ALBEDO     = vec3(0.09, 0.083, 0.075);   // dark, weathered paint (overall brightness)
+const vec3  BOAT_ALBEDO     = vec3(0.062, 0.057, 0.052);   // dark, weathered paint (overall brightness)
 const vec3  BOAT_SKY        = vec3(0.004, 0.075, 0.13); // sky overhead
 const vec3  BOAT_GLOW       = vec3(0.06, 0.24, 0.30);   // horizon haze and aurora beyond the boat
 const vec3  BOAT_SEA        = vec3(0.002, 0.10, 0.16);  // the sea, lighting the hull from below
