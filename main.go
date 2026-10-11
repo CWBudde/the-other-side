@@ -31,6 +31,7 @@ type options struct {
 	defines       defineList
 	shot          string
 	times         []float64
+	frames        int // > 0: numbered frame sequence instead of -times
 	compare       string
 	bench         time.Duration
 	bundle        string
@@ -55,10 +56,13 @@ func parseFlags() (*options, error) {
 	size := flag.String("size", "1280x720", "render/window size WxH")
 	t := flag.Float64("time", 0, "iTime for -shot")
 	times := flag.String("times", "", "comma-separated iTime list for -shot, e.g. 0,10,30")
+	fps := flag.Float64("fps", 30, "frame rate for -frames")
 
 	flag.StringVar(&opt.shader, "shader", "shaders/main.glsl", "main shader file (Shadertoy mainImage)")
 	flag.Var(&opt.defines, "D", "define NAME=VALUE (repeatable), injected as #define")
 	flag.StringVar(&opt.shot, "shot", "", "render offscreen to this PNG and exit")
+	flag.IntVar(&opt.frames, "frames", 0,
+		"with -shot: render this many frames from -time at -fps into <shot>_00000.png, ...")
 	flag.StringVar(&opt.compare, "compare", "",
 		"with -shot: also write <shot>_cmp.png montage against this reference image")
 	flag.DurationVar(&opt.bench, "bench", 0, "render offscreen for this long and report ms/frame, e.g. 3s")
@@ -70,19 +74,9 @@ func parseFlags() (*options, error) {
 		return nil, fmt.Errorf("invalid -size %q, want WxH", *size)
 	}
 
-	opt.times = []float64{*t}
-
-	if *times != "" {
-		opt.times = nil
-
-		for s := range strings.SplitSeq(*times, ",") {
-			v, err := strconv.ParseFloat(strings.TrimSpace(s), 64)
-			if err != nil {
-				return nil, fmt.Errorf("invalid -times entry %q", s)
-			}
-
-			opt.times = append(opt.times, v)
-		}
+	opt.times, err = shotTimes(*t, *times, *fps, opt.frames)
+	if err != nil {
+		return nil, err
 	}
 
 	if opt.compare != "" && opt.shot == "" {
@@ -90,6 +84,56 @@ func parseFlags() (*options, error) {
 	}
 
 	return opt, nil
+}
+
+// shotTimes returns the iTime values for shot mode: start alone, the -times
+// list, or a sequence of that many frames at fps beginning at start.
+func shotTimes(start float64, list string, fps float64, frames int) ([]float64, error) {
+	if frames > 0 {
+		if fps <= 0 || list != "" {
+			return nil, errors.New("-frames needs -fps > 0 and excludes -times")
+		}
+
+		times := make([]float64, frames)
+		for i := range times {
+			times[i] = start + float64(i)/fps
+		}
+
+		return times, nil
+	}
+
+	if list == "" {
+		return []float64{start}, nil
+	}
+
+	var times []float64
+
+	for s := range strings.SplitSeq(list, ",") {
+		v, err := strconv.ParseFloat(strings.TrimSpace(s), 64)
+		if err != nil {
+			return nil, fmt.Errorf("invalid -times entry %q", s)
+		}
+
+		times = append(times, v)
+	}
+
+	return times, nil
+}
+
+// shotPath names shot i at time t: numbered for -frames, time-stamped for
+// several -times, the plain -shot path otherwise.
+func shotPath(opt *options, i int, t float64) string {
+	ext := filepath.Ext(opt.shot)
+	base := strings.TrimSuffix(opt.shot, ext)
+
+	switch {
+	case opt.frames > 0:
+		return fmt.Sprintf("%s_%05d%s", base, i, ext)
+	case len(opt.times) > 1:
+		return fmt.Sprintf("%s_t%04.1f%s", base, t, ext)
+	default:
+		return opt.shot
+	}
 }
 
 func run(opt *options) error {
@@ -224,36 +268,48 @@ func runShot(opt *options, screen *quad) error {
 		}
 	}
 
-	for _, t := range opt.times {
-		path := opt.shot
-		if len(opt.times) > 1 {
-			ext := filepath.Ext(path)
-			path = fmt.Sprintf("%s_t%04.1f%s", strings.TrimSuffix(path, ext), t, ext)
-		}
+	for i, t := range opt.times {
+		path := shotPath(opt, i, t)
 
 		screen.draw(prog, fixedUniforms(opt, t))
 		gl.Finish()
 
-		img := readPixels(opt.width, opt.height)
-
-		err := writePNG(path, img)
+		err := writeShot(path, readPixels(opt.width, opt.height), ref, opt.frames == 0)
 		if err != nil {
 			return err
 		}
-
-		fmt.Println("wrote", path)
-
-		if ref != nil {
-			cmp := compareName(path)
-
-			err := writePNG(cmp, montage(img, ref))
-			if err != nil {
-				return err
-			}
-
-			fmt.Println("wrote", cmp)
-		}
 	}
+
+	if opt.frames > 0 {
+		fmt.Printf("wrote %d frames to %s\n", opt.frames, shotPath(opt, 0, 0))
+	}
+
+	return nil
+}
+
+// writeShot writes img to path and, with a reference, the comparison montage.
+func writeShot(path string, img *image.RGBA, ref image.Image, verbose bool) error {
+	err := writePNG(path, img)
+	if err != nil {
+		return err
+	}
+
+	if verbose {
+		fmt.Println("wrote", path)
+	}
+
+	if ref == nil {
+		return nil
+	}
+
+	cmp := compareName(path)
+
+	err = writePNG(cmp, montage(img, ref))
+	if err != nil {
+		return err
+	}
+
+	fmt.Println("wrote", cmp)
 
 	return nil
 }

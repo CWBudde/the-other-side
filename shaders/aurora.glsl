@@ -77,6 +77,25 @@ const vec3  AUR_COL_CORE   = vec3(0.45, 0.85, 0.52); // pale emission of the den
 const vec2  AUR_CORE       = vec2(0.55, 0.95);   // coverage range over which the core turns pale
 const vec3  AUR_COL_HALO   = vec3(0.006, 0.16, 0.14); // linear colour of the halo at full strength
 
+// ---- motion -------------------------------------------------------------------
+// All motion is smooth in time and bounded in space: the arcs stay where they
+// are, only the texture slides through them, the ribbons ripple and bright
+// patches travel along them. AUR_MOTION scales every speed and amplitude below
+// (time runs AUR_MOTION times faster and amplitudes grow by the same factor);
+// 0 gives the old, nearly static aurora.
+const float AUR_MOTION     = 0.5;               // master gain of the motion
+const vec3  AUR_SLIDE      = vec3(0.3, 0.35, 0.07); // common drift of rays and folds along the arcs: centre (rad),
+                                                // swing (rad), rate (rad/s); peak speed 0.025 rad/s, reverses every ~45 s.
+                                                // An endless drift would run nimitz's swirl to huge coordinates and smear
+                                                // it; offsets below ~-0.2 also turn the texture fibrous, hence the centre.
+const vec2  AUR_SLIDE_VAR  = vec2(0.10, 0.06);  // two waves of extra slide (rad) running along the arcs
+const vec2  AUR_SLIDE_RATE = vec2(0.26, -0.34); // their rates (rad/s): local speeds differ by up to VAR * RATE
+const float AUR_WAVE       = 0.012;             // amplitude of the travelling undulations of the arcs (v units)
+const vec2  AUR_WAVE_RATE  = vec2(0.70, 0.90);  // angular frequency of the two wave trains (periods ~9 s and ~7 s)
+const vec2  AUR_SURGE      = vec2(0.24, 0.16);  // brightness patches: travel along the arc, change in place (noise cells/s)
+const float AUR_SURGE_OCT  = 0.35;              // share of a finer, faster second octave in the brightness patches
+const float AUR_SHIMMER    = 0.22;              // rotation speed of nimitz's texture (rays morph; was 0.06)
+
 mat2 aurMm2(float a) { float c = cos(a), s = sin(a); return mat2(c, s, -s, c); }
 const mat2 AUR_M2 = mat2(0.95534, 0.29552, -0.29552, 0.95534);
 float aurTri(float x) { return clamp(abs(fract(x) - 0.5), 0.01, 0.49); }
@@ -90,7 +109,7 @@ float triNoise2d(vec2 p, float spd) {
     vec2 bp = p;
     for (float i = 0.0; i < 5.0; i++) {
         vec2 dg = aurTri2(bp * 1.85) * 0.75;
-        dg *= aurMm2(iTime * spd);
+        dg *= aurMm2(mod(iTime * spd, TAU)); // wrapped: sin / cos lose precision for large angles
         p -= dg / z2;
 
         bp *= 1.3;
@@ -111,7 +130,9 @@ float triNoise2d(vec2 p, float spd) {
 // then run out flat toward the horizon, e = h (1 - x^2) / (1 + fall x^2).
 // Returns the arc elevation e and 1 / (thickness measured along v), so the
 // per-sample profile is a single exp pair.
-void aurArcSetup(float phi, vec4 arc, float skew, float fall, float t, out float e, out float invW) {
+// tm = motion time (t * AUR_MOTION), dir = travel direction of the waves (+-1).
+void aurArcSetup(float phi, vec4 arc, float skew, float fall, float t, float tm, float dir,
+                 out float e, out float invW) {
     float hw = arc.y * (phi > arc.x ? skew : 1.0);
     float x = (phi - arc.x) / hw;
     float d = 1.0 / (1.0 + fall * x * x);
@@ -119,6 +140,12 @@ void aurArcSetup(float phi, vec4 arc, float skew, float fall, float t, out float
     float slope = -2.0 * arc.z * x * (1.0 + fall) * d * d / hw;  // de/dphi
     // slow undulation along the arc
     e += AUR_WOBBLE * (0.6 * sin(phi * 9.0 + t * AUR_DRIFT * 2.3) + 0.4 * sin(phi * 17.0 - t * AUR_DRIFT * 1.7 + 1.3));
+    // travelling ripples: two wave trains running along the ribbon in direction
+    // dir (phase speeds ~0.10 and ~0.075 rad/s, i.e. across the frame in ~10-14 s)
+    vec2 ph = vec2(7.0, 12.0) * phi - dir * mod(AUR_WAVE_RATE * tm, TAU) + vec2(0.7, 2.9) * dir;
+    float wa = AUR_WAVE * AUR_MOTION;
+    e += wa * (0.6 * sin(ph.x) + 0.4 * sin(ph.y));
+    slope += wa * (0.6 * 7.0 * cos(ph.x) + 0.4 * 12.0 * cos(ph.y));
     // the ribbon widens where it comes down to the horizon (seen more edge-on)
     float w = arc.w * (1.0 + AUR_FOOT * clamp(1.0 - e / arc.z, 0.0, 1.0));
     // dividing the vertical offset by sqrt(1 + slope^2) approximates the
@@ -139,17 +166,24 @@ vec4 aurora(vec3 ro, vec3 rd, int steps) {
 
     // ---- per-ray band setup ------------------------------------------------
     float t = iTime;
+    float tm = t * AUR_MOTION;
     float phi = atan(rd.x, rd.z);
     float eA, iwA, eB, iwB;
-    aurArcSetup(phi, AUR_ARC_A, AUR_SKEW.x, AUR_FALL.x, t, eA, iwA);
-    aurArcSetup(phi, AUR_ARC_B, AUR_SKEW.y, AUR_FALL.y, t + 50.0, eB, iwB);
+    aurArcSetup(phi, AUR_ARC_A, AUR_SKEW.x, AUR_FALL.x, t, tm, 1.0, eA, iwA);
+    aurArcSetup(phi, AUR_ARC_B, AUR_SKEW.y, AUR_FALL.y, t + 50.0, tm, -1.0, eB, iwB);
+    // brightness surges: patches that travel along each arc (A to the right,
+    // B to the left) and brighten / fade in place over a few seconds
+    float sA = mix(noise(vec2(phi * 4.0 + t * AUR_DRIFT * 0.4 - tm * AUR_SURGE.x, 3.1 + tm * AUR_SURGE.y)),
+                   noise(vec2(phi * 9.0 - tm * AUR_SURGE.x * 1.7, 13.7 + tm * AUR_SURGE.y * 1.6)), AUR_SURGE_OCT);
+    float sB = mix(noise(vec2(phi * 5.0 - t * AUR_DRIFT * 0.3 + tm * AUR_SURGE.x, 7.3 + tm * AUR_SURGE.y)),
+                   noise(vec2(phi * 10.0 + tm * AUR_SURGE.x * 1.7, 21.1 + tm * AUR_SURGE.y * 1.6)), AUR_SURGE_OCT);
     // main arc: strongest on the left and in the centre, fainter to the right
     float gA = mix(0.4, 0.7, smoothstep(0.42, 0.1, phi));
-    gA *= 0.55 + 0.45 * noise(vec2(phi * 4.0 + t * AUR_DRIFT * 0.4, 3.1));
+    gA *= 0.55 + 0.45 * sA;
     gA *= 1.0 + AUR_LEFT_BOOST * smoothstep(-0.15, -0.32, phi) * smoothstep(-0.54, -0.38, phi);
     // second arc: starts left of centre and runs down to the right horizon
     float gB = AUR_ARC_B_GAIN * smoothstep(-0.34, -0.18, phi) * mix(0.85, 1.05, smoothstep(0.1, 0.3, phi));
-    gB *= 0.55 + 0.45 * noise(vec2(phi * 5.0 - t * AUR_DRIFT * 0.3, 7.3));
+    gB *= 0.55 + 0.45 * sB;
     gB *= mix(1.0, 0.15, smoothstep(0.22, 0.45, phi)); // softer where it meets the right horizon
     if (gB < 1e-3) eB = -1.0; // move a missing arc out of reach
     float vHi = max(eA + AUR_CUT / iwA, eB + AUR_CUT / iwB); // band influence in v
@@ -184,6 +218,24 @@ vec4 aurora(vec3 ro, vec3 rd, int steps) {
     float k = 50.0 / float(steps);
     float dither = hash12(gl_FragCoord.xy);
     vec3 origin = vec3(ro.x, 0.0, ro.z - 6.7); // layer heights are relative to the eye
+    // Lateral slide ds of the texture through the (fixed) band mask: a common
+    // drift plus a bounded extra slide that varies along the arc, so
+    // neighbouring parts move at different speeds without the texture shearing
+    // apart over time. The world-space part is moved by the same angle as a
+    // sideways shift (x) at the sample's distance, not a turn about the eye: a
+    // turn would also change the orientation of nimitz's texture and streak it.
+    // ds is constant along the ray. A slide that differs per layer (height) or
+    // per arc needs a shear across the layers or across v, which drags the
+    // texture into fibres even when small; the arcs differ by their waves and
+    // surges instead.
+    float spd = mix(0.06, AUR_SHIMMER, AUR_MOTION);
+    float drift = AUR_MOTION * (AUR_SLIDE.x + AUR_SLIDE.y * sin(mod(AUR_SLIDE.z * tm, TAU)));
+    vec2 slVar = AUR_SLIDE_VAR * AUR_MOTION;
+    vec2 slPh = mod(AUR_SLIDE_RATE * tm, TAU) + vec2(2.0, 3.5) * phi + vec2(0.0, 1.7);
+    vec2 sl0 = slVar * sin(slPh);
+    float ds = drift + sl0.x + sl0.y;
+    float phiT = phi + ds;
+    float shiftX = hz * ds;
 
     for (int j = 0; j < steps; j++) {
         float i = (float(j) + dither) * k; // stratified jitter across layers
@@ -197,12 +249,13 @@ vec4 aurora(vec3 ro, vec3 rd, int steps) {
         vec4 col2 = vec4(0.0);
         if (v < vHi) {
             float band = gA * aurProfile((v - eA) * iwA) + gB * aurProfile((v - eB) * iwB);
-            vec3 bpos = origin + pt * rd;
-            // nimitz's world-space texture coordinates, blended with band-aligned
-            // polar ones (azimuth stretched) for finer rays across the ribbon
-            vec2 tp = bpos.zx * AUR_TEX_SCALE * (1.0 - AUR_RAYS)
-                    + vec2(phi * AUR_RAY_FREQ, v * AUR_RAY_FREQ * 0.25) * AUR_RAYS;
-            float rzt = (AUR_BODY + triNoise2d(tp, 0.06)) * band * AUR_DENSITY;
+            // nimitz's world-space texture coordinates (shifted sideways by the
+            // slide), blended with band-aligned polar ones (azimuth stretched)
+            // for finer rays across the ribbon
+            vec2 bzx = origin.zx + pt * vec2(rd.z, rd.x + shiftX);
+            vec2 tp = bzx * AUR_TEX_SCALE * (1.0 - AUR_RAYS)
+                    + vec2(phiT * AUR_RAY_FREQ, v * AUR_RAY_FREQ * 0.25) * AUR_RAYS;
+            float rzt = (AUR_BODY + triNoise2d(tp, spd)) * band * AUR_DENSITY;
             col2 = vec4(mix(AUR_COL_LOW, AUR_COL_HIGH, smoothstep(0.0, 50.0, i)) * rzt, rzt);
         }
         avgCol = mix(avgCol, col2, 0.5);

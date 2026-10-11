@@ -26,7 +26,7 @@ vec3 gCamPos = vec3(0.0, CAM_HEIGHT, 0.0);
 
 // ---- layer contracts (defined in sky.glsl, aurora.glsl, main.glsl, water.glsl)
 vec3 skyBase(vec3 rd);                    // sky gradient + haze + stars, no aurora
-vec3 skyBase(vec3 rd, float starGain);    // same with the stars scaled (0 = none)
+vec3 skyBase(vec3 rd, float starGain);    // same with the stars scaled (0 = none), not dimmed
 vec4 aurora(vec3 ro, vec3 rd, int steps); // premultiplied rgb + alpha
 vec3 skyFull(vec3 rd);                    // skyBase composited with aurora (AURORA_STEPS)
 vec3 skyFull(vec3 rd, int steps);         // same with an explicit aurora step count

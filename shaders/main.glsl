@@ -3,6 +3,7 @@
 // Layer isolation for look-dev (runner: -D VIEW=n):
 //   0 full composite   1 sky only (skyBase)   2 aurora only
 //   3 water only       4 water normals (red = x slope, green = z slope)
+//   5 meteors only (shooting stars; -D METEOR_FORCE=1 puts one in every slot)
 #ifndef VIEW
 #define VIEW 0
 #endif
@@ -14,10 +15,11 @@
 #include "common.glsl"
 #include "sky.glsl"
 #include "aurora.glsl"
+#include "meteors.glsl"
 
 vec3 skyFull(vec3 rd, int steps) {
     vec4 a = aurora(gCamPos, rd, steps);
-    return skyBase(rd) * (1.0 - a.a) + a.rgb;
+    return skyBase(rd) * (1.0 - a.a) + a.rgb + meteors(rd);
 }
 
 vec3 skyFull(vec3 rd) { return skyFull(rd, AURORA_STEPS); }
@@ -26,7 +28,7 @@ vec3 skyFull(vec3 rd) { return skyFull(rd, AURORA_STEPS); }
 // reflection direction rdAur and scaled by AURORA_REFL_GAIN, so it only shows
 // as a faint diffuse lift instead of bright patches, while the haze keeps its
 // full reflection (the bright horizon band and the long sheen streaks).
-// Stars are left out: their glints on the moving waves only flicker.
+// Stars and meteors are left out: their glints on the moving waves only flicker.
 vec3 skyRefl(vec3 rd, vec3 rdAur, int steps) {
     vec4 a = aurora(gCamPos, rdAur, steps) * AURORA_REFL_GAIN;
     return skyBase(rd, 0.0) * (1.0 - a.a) + a.rgb;
@@ -82,6 +84,8 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
         fragColor = vec4(0.0, 0.0, 0.0, 1.0);
     }
     return;
+#elif VIEW == 5
+    if (isSky) col = meteors(rd);
 #endif
 
     fragColor = vec4(post(col, fragCoord), 1.0);

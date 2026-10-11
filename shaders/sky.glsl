@@ -1,7 +1,8 @@
 // sky.glsl - night sky without the aurora.
 //
 // Contract: vec3 skyBase(vec3 rd)  -> linear RGB for view direction rd.
-//           vec3 skyBase(vec3 rd, float starGain)  same with scaled stars.
+//           vec3 skyBase(vec3 rd, float starGain)  same with scaled stars and
+//           without the SKY_DIM darkening (water reflections).
 //
 // The gradient is calibrated against reference/reference.png: a saturated
 // deep blue-teal zenith, a teal mid sky and a greyer cyan haze near the
@@ -32,6 +33,12 @@ const float SKY_HAZE_LO    = 0.08;     // haze blend weight at the horizon, far 
 const float SKY_HAZE_HI    = 0.85;     // haze blend weight at the horizon, bright side
 const float SKY_HAZE_HLO   = 0.065;    // Gaussian width of the haze in rd.y, far side
 const float SKY_HAZE_HHI   = 0.095;    // Gaussian width of the haze in rd.y, bright side
+// Overall dimming of the gradient as seen directly (stars and the water
+// reflections excluded), deepened toward the top left corner of the frame
+// (azimuth ~ -0.47 rad, rd.y ~ 0.38).
+const float SKY_DIM        = 0.90;     // gain everywhere
+const float SKY_DIM_TL     = 0.80;     // gain at the top left corner
+const vec4  SKY_DIM_TL_R   = vec4(-0.05, -0.45, 0.08, 0.36); // smoothstep ranges: azimuth (from, to), rd.y (from, to)
 
 // ---- star tunables ----------------------------------------------------------
 // Per layer: cell size (radians), probability of a star per cell and the peak
@@ -44,7 +51,26 @@ const float STAR_SKEW      = 2.6;      // brightness = peak * h^SKEW
 const float STAR_SIZE      = 2.2e-4;   // intrinsic angular sigma (radians), ~0.35 px at 1080p
 const float STAR_AA        = 0.42;     // minimum sigma in pixels (antialiasing footprint)
 const float STAR_EXT       = 0.055;    // haze extinction per airmass; stars fade toward the horizon
-const float STAR_TWINKLE   = 0.25;     // twinkle depth high up; grows with airmass
+// Twinkle (scintillation): per-star smooth value noise in time, 2 octaves,
+// applied log-normally, so a star mostly glows steadily with brief gentle
+// brightenings and dips. The time average of every star is unchanged.
+const float STAR_TWINKLE   = 0.14;     // sd of log brightness for bright stars high up
+const float STAR_TW_LOW    = 1.6;      // max depth gain toward the horizon (airmass)
+const float STAR_TW_RATE   = 4.0;      // noise lattice rate in 1/s (+-30 % per star); ~1-5 Hz flicker
+const float STAR_TW_OCT2   = 0.6;      // weight of the 2nd, 2.37x faster octave
+const float STAR_TW_FAINT  = 0.25;     // relative depth on faint stars
+const float STAR_TW_BRIGHT = 0.35;     // brightness (peak * extinction) from which the full depth applies
+const float STAR_TW_CHROMA = 0.4;      // colour flicker of low stars, relative to the twinkle depth
+
+// Smooth 1D value noise for star twinkle: three independent channels in
+// [-0.5, 0.5], zero mean, lattice values hashed per star cell and tick.
+vec3 starNoise(ivec2 id, int salt, float t) {
+    float n = floor(t);
+    float f = t - n;
+    f = f * f * (3.0 - 2.0 * f);
+    int z = 0x100000 + salt + 8 * int(n); // clear of the position hashes
+    return mix(hash33i(ivec3(id, z)), hash33i(ivec3(id, z + 8)), f) - 0.5;
+}
 
 // Gaussian star field on (azimuth, elevation) cells. rd must be normalized,
 // az = atan(rd.x, rd.z). The azimuth seam is behind the camera.
@@ -63,7 +89,8 @@ vec3 skyStars(vec3 rd, float az) {
 
     float airmass = 1.0 / (max(rd.y, 0.0) + 0.012);
     float ext = exp(-STAR_EXT * airmass) * smoothstep(-0.005, 0.01, rd.y);
-    float twAmt = STAR_TWINKLE * clamp(airmass * 0.08, 1.0, 3.0);
+    float twAmt = STAR_TWINKLE * min(pow(max(airmass * 0.4, 1.0), 0.4), STAR_TW_LOW);
+    float twChroma = STAR_TW_CHROMA * smoothstep(0.1, 0.02, rd.y);
 
     vec3 col = vec3(0.0);
     for (int i = 0; i < 3; i++) {
@@ -81,12 +108,20 @@ vec3 skyStars(vec3 rd, float az) {
 
         float u = h.z / STAR_PROB[i]; // uniform in [0, 1) for the stars that exist
         float b = STAR_PEAK[i] * pow(k.x, STAR_SKEW);
-        float t = iTime * (1.5 + 3.0 * k.y) + TAU * k.z;
-        b *= 1.0 + twAmt * 0.5 * (sin(t) + sin(1.73 * t + 2.0));
+        if (shape * b < 1e-5) continue; // far outside the disc: skip the twinkle noise
 
         // Mostly white to faintly blue, a rare warm one.
         vec3 tint = mix(vec3(0.78, 0.9, 1.0), vec3(1.0), fract(u * 7.0));
         tint = u > 0.95 ? vec3(1.0, 0.9, 0.78) : tint;
+
+        // Twinkle: n.x drives the brightness (normalized to unit sd), n.yz a
+        // zero-sum colour flicker. Faint stars barely change.
+        float tt = iTime * STAR_TW_RATE * (0.7 + 0.6 * k.y) + 113.0 * k.z;
+        vec3 n = starNoise(ivec2(id), 2 * i + 1, tt) + STAR_TW_OCT2 * starNoise(ivec2(id), 2 * i + 2, 2.37 * tt);
+        n *= 4.02 / sqrt(1.0 + STAR_TW_OCT2 * STAR_TW_OCT2); // 1 / sd of one octave
+        float sig = twAmt * mix(STAR_TW_FAINT, 1.0, smoothstep(0.02, STAR_TW_BRIGHT, b * ext));
+        b *= exp(sig * n.x - 0.5 * sig * sig);
+        tint *= 1.0 + sig * twChroma * vec3(n.y, -0.5 * n.y + 0.866 * n.z, -0.5 * n.y - 0.866 * n.z);
 
         // Layers whose cells shrink to a few pixels fade out instead of aliasing.
         float lod = smoothstep(3.0, 6.0, cell / pa);
@@ -96,8 +131,10 @@ vec3 skyStars(vec3 rd, float az) {
 }
 
 // starGain scales the star field: the water reflections pass 0, since moving
-// sub-pixel star glints on the waves only sparkle and flicker.
-vec3 skyBase(vec3 rd, float starGain) {
+// sub-pixel star glints on the waves only sparkle and flicker. dim (0..1) is
+// how much of the SKY_DIM darkening applies; the reflections skip it, so the
+// water keeps its brightness.
+vec3 skyBase(vec3 rd, float starGain, float dim) {
     float y = max(rd.y, 0.0);
     float az = atan(rd.x, rd.z);
     float s = az - SKY_SIDE_AZ;
@@ -113,8 +150,11 @@ vec3 skyBase(vec3 rd, float starGain) {
     col = mix(col, hexColor(SKY_HAZE), haze);
     float band = (y - SKY_BAND_Y) / SKY_BAND_W;
     col += hexColor(SKY_BAND) * max(1.0 - band * band, 0.0);
+    float tl = smoothstep(SKY_DIM_TL_R.x, SKY_DIM_TL_R.y, az) * smoothstep(SKY_DIM_TL_R.z, SKY_DIM_TL_R.w, y);
+    col *= mix(1.0, mix(SKY_DIM, SKY_DIM_TL, tl), dim);
     if (starGain > 0.0) col += skyStars(rd, az) * starGain;
     return col;
 }
 
-vec3 skyBase(vec3 rd) { return skyBase(rd, 1.0); }
+vec3 skyBase(vec3 rd, float starGain) { return skyBase(rd, starGain, 0.0); }
+vec3 skyBase(vec3 rd) { return skyBase(rd, 1.0, 1.0); }

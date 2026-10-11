@@ -95,6 +95,18 @@ shot times="0,15" *args:
 compare ref times="0,15" *args:
     go run . -size {{size}} -shot out/shot.png -times {{times}} -compare {{ref}} {{args}}
 
+# Frame sequence (start and duration in seconds) into out/clip/, encoded as out/clip.mp4
+clip start="0" dur="12" fps="30" *args:
+    rm -rf out/clip && mkdir -p out/clip
+    go run . -size {{size}} -shot out/clip/f.png -time {{start}} -fps {{fps}} -frames $(awk 'BEGIN { print int({{dur}} * {{fps}} + 0.5) }') {{args}}
+    ffmpeg -loglevel error -y -framerate {{fps}} -i out/clip/f_%05d.png -c:v libx264 -pix_fmt yuv420p -crf 16 out/clip.mp4
+    @echo "wrote out/clip.mp4"
+
+# Contact sheet of every n-th frame of a frame sequence (crop = ffmpeg crop w:h:x:y)
+sheet dir="out/clip" every="15" grid="4x4" crop="iw:ih:0:0" width="480" out="out/sheet.png":
+    ffmpeg -loglevel error -y -i {{dir}}/f_%05d.png -vf "select='not(mod(n\,{{every}}))',crop={{crop}},scale={{width}}:-1,tile={{grid}}:padding=4" -frames:v 1 {{out}}
+    @echo "wrote {{out}}"
+
 # Benchmark at 1280x720 and 1920x1080
 bench dur="3s" *args:
     go run . -bench {{dur}} -size 1280x720 {{args}}
