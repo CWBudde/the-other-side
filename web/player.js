@@ -7,10 +7,19 @@
 //
 // URL parameters: ?scale=0.75 fixes the render scale (default: adaptive, at
 // most 1080 lines), ?t=20 starts at iTime 20.
+//
+// Adaptive scale: the median frame interval over a window of frames decides,
+// so single hitches (GC, tab switches) do not count. Vsync quantises the
+// interval (a frame that misses 60 Hz shows at 33 ms), hence the wide gap
+// between the two thresholds: one step down costs 0.64x the pixels, so a
+// step up from below FAST_MS cannot land above SLOW_MS and oscillate.
 
 const MAX_LINES = 1080; // render height cap at scale 1
-const MIN_SCALE = 0.35; // adaptive scaling never goes below this
-const SLOW_MS = 34; // average frame time that triggers a downscale
+const SCALE_STEP = 0.8; // scale ratio between adaptive levels
+const MAX_LEVEL = 4; // lowest adaptive scale is SCALE_STEP^MAX_LEVEL (0.41)
+const SLOW_MS = 45; // median frame interval above which the scale steps down
+const FAST_MS = 20; // median frame interval below which it steps back up
+const WINDOW = 90; // frame intervals per decision
 
 const canvas = document.getElementById("view");
 const params = new URLSearchParams(location.search);
@@ -170,6 +179,7 @@ function makeTarget(w, h) {
 const fixedScale = params.has("scale")
   ? Math.min(Math.max(parseFloat(params.get("scale")) || 1, 0.1), 2)
   : null;
+let level = 0; // adaptive level, scale = SCALE_STEP^level
 let scale = fixedScale ?? 1;
 
 function resize() {
@@ -206,8 +216,14 @@ canvas.addEventListener("dblclick", () => {
 let time = parseFloat(params.get("t")) || 0;
 let frame = 0;
 let last = null;
-let slowAvg = 0; // smoothed frame time for adaptive scaling
-let settle = 30; // frames to skip after start or a scale change
+let samples = []; // frame intervals (ms) since the last decision
+let settle = 30; // frames to skip after start, a scale change or a hidden tab
+
+document.addEventListener("visibilitychange", () => {
+  last = null;
+  samples = [];
+  settle = 30;
+});
 
 function setUniforms(p, w, h, dt) {
   const now = new Date();
@@ -227,25 +243,34 @@ function setUniforms(p, w, h, dt) {
 }
 
 function adapt(ms) {
-  if (fixedScale !== null || scale <= MIN_SCALE) return;
+  if (fixedScale !== null) return;
   if (settle > 0) {
     settle--;
-    slowAvg = ms;
     return;
   }
-  slowAvg += (ms - slowAvg) * 0.05;
-  if (slowAvg > SLOW_MS) {
-    scale = Math.max(MIN_SCALE, scale * 0.8);
-    settle = 30;
-  }
+  samples.push(ms);
+  if (samples.length < WINDOW) return;
+  const median = samples.sort((a, b) => a - b)[WINDOW >> 1];
+  samples = [];
+  let next = level;
+  if (median > SLOW_MS && level < MAX_LEVEL) next++;
+  else if (median < FAST_MS && level > 0) next--;
+  if (next === level) return;
+  level = next;
+  scale = SCALE_STEP ** level;
+  settle = 30;
+  console.info(
+    `median frame ${median.toFixed(1)} ms, render scale now ${scale.toFixed(2)}`,
+  );
 }
 
 function draw(nowMs) {
-  const dt = last === null ? 0 : Math.min((nowMs - last) / 1000, 0.1);
+  const raw = last === null ? 0 : nowMs - last;
+  const dt = Math.min(raw / 1000, 0.1);
   last = nowMs;
   if (!paused) {
     time += dt;
-    adapt(dt * 1000);
+    if (raw > 0) adapt(raw);
   }
   resize();
   const { w, h } = target;
