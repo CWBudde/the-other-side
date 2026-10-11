@@ -116,3 +116,10 @@ bench dur="3s" *args:
 bundle *args:
     go run . -bundle out/shadertoy.glsl {{args}}
     go run . -shader out/shadertoy.glsl -shot out/shadertoy_check.png -time 15 -size {{size}}
+
+# Static WebGL2 site in out/web (what the Pages workflow publishes), served on :8000
+web port="8000" *args:
+    rm -rf out/web && mkdir -p out/web
+    go run . -bundle out/web/shadertoy.glsl {{args}}
+    cp web/* out/web/
+    python3 -m http.server -d out/web {{port}}

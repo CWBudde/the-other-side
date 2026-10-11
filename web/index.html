@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>The Other Side</title>
+    <link rel="icon" href="data:," />
+    <meta
+      name="description"
+      content="A GLSL night sea under an aurora, with a rowing boat riding the swells."
+    />
+    <style>
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        background: #000;
+        overflow: hidden;
+      }
+      canvas {
+        display: block;
+        width: 100vw;
+        height: 100vh;
+      }
+      #credits {
+        position: fixed;
+        right: 12px;
+        bottom: 10px;
+        font:
+          12px/1.4 system-ui,
+          sans-serif;
+        color: #9cc;
+        opacity: 0.45;
+        transition: opacity 0.4s;
+      }
+      #credits:hover {
+        opacity: 0.9;
+      }
+      #credits a {
+        color: inherit;
+      }
+      #error {
+        position: fixed;
+        inset: 0;
+        margin: 0;
+        padding: 16px;
+        color: #f88;
+        background: rgba(0, 0, 0, 0.85);
+        font: 12px/1.4 monospace;
+        white-space: pre-wrap;
+        overflow: auto;
+      }
+    </style>
+  </head>
+  <body>
+    <canvas id="view"></canvas>
+    <div id="credits">
+      Aurora after
+      <a href="https://www.shadertoy.com/view/XtGGRt">"Auroras" by nimitz</a>
+      (<a href="https://creativecommons.org/licenses/by-nc-sa/3.0/"
+        >CC BY-NC-SA 3.0</a
+      >) ·
+      <a href="https://github.com/MeKo-Christian/the-other-side">source</a> ·
+      Space pauses, F fullscreen
+    </div>
+    <pre id="error" hidden></pre>
+    <script type="module" src="player.js"></script>
+  </body>
+</html>

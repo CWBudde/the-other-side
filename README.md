@@ -27,6 +27,8 @@ built from Buffer A's mip chain, then tonemaps.
 | `shaders/water.glsl`                                  | `water`: analytic sea plane, filtered swells and ripples              |
 | `shaders/boat.glsl`                                   | `boat`: rowing boat (sphere-traced 3D hull) riding the swells         |
 | `main.go`, `render.go`, `preprocess.go`, `compare.go` | the runner                                                            |
+| `web/`                                                | WebGL2 player for the bundled passes (GitHub Pages)                   |
+| `.github/workflows/pages.yml`                         | bundles the shaders and publishes `web/` to GitHub Pages              |
 | `out/`                                                | render output (git-ignored)                                           |
 
 Every shader file lists its tunables as constants at the top.
@@ -120,6 +122,7 @@ water reflections are not dimmed). The main dials for the animation: `STAR_TWINK
 | `just compare REF [times] [args]`                      | shots plus `_cmp` montages against `REF` (e.g. an earlier render)         |
 | `just bench [dur] [args]`                              | benchmark at 1280x720 and 1920x1080                                       |
 | `just bundle [args]`                                   | write `out/shadertoy.glsl` + `out/buffer_a.glsl`, render them as a check  |
+| `just web [port] [args]`                               | bundle into `out/web` with the WebGL2 player and serve it on `:8000`      |
 | `just setup-deps`                                      | install treefmt, prettier, gofumpt, gci, shfmt, golangci-lint             |
 | `just fmt`                                             | format with treefmt (`treefmt.toml`; GLSL is not formatted)               |
 | `just lint` / `just lint-fix`                          | golangci-lint with `.golangci.toml`                                       |
@@ -127,6 +130,16 @@ water reflections are not dimmed). The main dials for the animation: `STAR_TWINK
 | `just check`                                           | formatted, lint, `go mod tidy -diff`, build and vet                       |
 
 Extra runner flags can be appended, for example `just shot 0,10 -D VIEW=3`.
+
+## Web version
+
+Live at <https://meko-christian.github.io/the-other-side/>. On every push to `main`,
+the Pages workflow bundles the shaders and publishes them with the small WebGL2 player
+in `web/`, which runs the same two passes as the Go runner (Buffer A in a half-float
+texture with mipmaps, then the Image pass). It renders at most 1080 lines and lowers
+the resolution further when frames take longer than about 34 ms. `?scale=0.5` fixes
+the render scale, `?t=20` sets the start time. Keys: `Space` pauses, `F` or a double
+click toggles fullscreen. `just web` builds and serves the same site locally.
 
 ## Performance
 
