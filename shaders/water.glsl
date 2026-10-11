@@ -3,8 +3,10 @@
 // Contracts:
 //   vec3 water(vec3 ro, vec3 rd)            -> linear RGB, caller guarantees rd.y < 0
 //   vec3 waterNormal(vec2 xz, float dist)   -> unit normal (used by VIEW 4)
+//   float waterSwellHeight(vec2 xz)         -> swell height in metres (the boat rides on it)
 // Reflections call skyRefl(dir, dirAurora, AURORA_STEPS_REFL), defined in main.glsl,
-// and boatCover (boat.glsl) for the reflection of the boat.
+// and boat (boat.glsl) for the reflection of the boat; boatSeaHeight (boat.glsl)
+// lifts the plane to the true swell height around the boat.
 //
 // Approach: analytic ray/plane hit at y = 0 (no raymarching). The surface is a
 // height field whose gradient is evaluated analytically:
@@ -178,6 +180,33 @@ vec4 waterGradient(vec2 xz, float dist, out vec2 gRipple) {
     return vec4(grad + gRipple, varLost, varAll);
 }
 
+// Height of the swells at xz in metres (zero mean, not filtered, ripples left
+// out): the integral of the swell part of waterGradient. The sea is drawn as
+// a flat plane with these slopes; the boat floats on this height and is cut
+// off by it at the waterline.
+float waterSwellHeight(vec2 xz) {
+    float t = iTime * WATER_TIME_SCALE;
+    float q = max(WATER_SWELL_SHARP, 1e-3);
+    // Mean of exp(q * (sin - 1)) over a period: exp(-q) * I0(q).
+    float q2 = 0.25 * q * q;
+    float mean = exp(-q) * (1.0 + q2 + q2 * q2 / 4.0 + q2 * q2 * q2 / 36.0);
+    float warp = WATER_WARP_AMOUNT * waterNoised(xz * WATER_WARP_SCALE + vec2(0.0, t * 0.01)).x;
+    float lambda = WATER_SWELL_LAMBDA;
+    float slope = WATER_SWELL_SLOPE;
+    float h = 0.0;
+    for (int i = 0; i < WATER_SWELLS; i++) {
+        float fi = float(i);
+        float ang = WATER_SWELL_ANGLE + (hash11(fi * 7.31 + 1.7) - 0.5) * 2.0 * WATER_SWELL_SPREAD;
+        float k = TAU / lambda;
+        float ph = dot(vec2(sin(ang), -cos(ang)) * k, xz) - sqrt(9.81 * k) * t
+                 + hash11(fi * 3.17 + 0.3) * TAU + warp * (lambda / WATER_SWELL_LAMBDA + 0.3);
+        h += slope / k / q * (exp(q * (sin(ph) - 1.0)) - mean);
+        lambda *= WATER_SWELL_DECAY;
+        slope *= WATER_SWELL_SLOPE_DECAY;
+    }
+    return h;
+}
+
 vec3 waterNormal(vec2 xz, float dist) {
     vec2 gRipple;
     vec2 g = waterGradient(xz, dist, gRipple).xy;
@@ -187,6 +216,12 @@ vec3 waterNormal(vec2 xz, float dist) {
 vec3 water(vec3 ro, vec3 rd) {
     float t = -ro.y / min(rd.y, -1e-4);
     vec3 p = ro + t * rd;
+    // Around the boat, meet the true swell height instead of the flat plane
+    // (one step is enough for these gentle swells), so the reflection of the
+    // hull starts at the waterline the hull is cut at.
+    float hs = boatSeaHeight(p.xz);
+    t = (hs - ro.y) / min(rd.y, -1e-4);
+    p = ro + t * rd;
     vec2 gRipple;
     vec4 gv = waterGradient(p.xz, t, gRipple);
     // Ripples only partly steer the reflection ray: this stands in for the
@@ -231,7 +266,7 @@ vec3 water(vec3 ro, vec3 rd) {
     // breaks up on the swells. The edge width covers the camera-to-surface
     // part of the path as well.
     float pa = 1.0 / (iResolution.y * FOCAL), tb;
-    float boat = boatCover(p, r, pa, t * pa + BOAT_REFL_BLUR, tb);
-    refl = mix(refl, BOAT_COL, boat);
+    vec4 bt = boat(p, r, pa, t * pa + BOAT_REFL_BLUR, tb);
+    refl = mix(refl, bt.rgb, bt.a);
     return mix(WATER_BODY, refl, fres);
 }

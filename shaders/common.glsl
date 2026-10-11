@@ -33,7 +33,9 @@ vec3 skyFull(vec3 rd, int steps);         // same with an explicit aurora step c
 vec3 skyRefl(vec3 rd, vec3 rdAur, int steps); // reflection variant, aurora along rdAur, dimmed
 vec3 water(vec3 ro, vec3 rd);             // shaded water for a ray with rd.y < 0
 vec3 waterNormal(vec2 xz, float dist);    // water surface normal at xz, seen from dist
-float boatCover(vec3 ro, vec3 rd, float footprint, float soft, out float t); // boat coverage along a ray
+float waterSwellHeight(vec2 xz);          // unfiltered swell height (m), what the boat floats on
+vec4 boat(vec3 ro, vec3 rd, float footprint, float soft, out float t); // boat colour + coverage along a ray
+float boatSeaHeight(vec2 xz);             // sea height for the water shading near the boat (0 elsewhere)
 
 // ---- math -------------------------------------------------------------------
 mat2 rot(float a) {

@@ -2,7 +2,7 @@
 
 A GLSL night-sea scene: a teal starry sky, two broad cyan-green aurora ribbons low
 over the horizon, and a calm sea with long swells that reflects the sky, with an empty
-rowing boat as a dark silhouette. It recreates the look of the "The Other Side"
+rowing boat with its resting oars, dark against the light, riding the swells. It recreates the look of the "The Other Side"
 visualizer.
 
 The scene is written in Shadertoy form (`mainImage`) and split into include files.
@@ -20,7 +20,7 @@ everything into a single file that you can paste into Shadertoy.
 | `shaders/aurora.glsl`                                 | `aurora`: nimitz's volumetric aurora with an arc band mask and motion |
 | `shaders/meteors.glsl`                                | `meteors`: occasional shooting stars, right to left                   |
 | `shaders/water.glsl`                                  | `water`: analytic sea plane, filtered swells and ripples              |
-| `shaders/boat.glsl`                                   | `boatCover`: rowing boat silhouette (side profile on a vertical card) |
+| `shaders/boat.glsl`                                   | `boat`: rowing boat (sphere-traced 3D hull) riding the swells         |
 | `main.go`, `render.go`, `preprocess.go`, `compare.go` | the runner                                                            |
 | `out/`                                                | render output (git-ignored)                                           |
 
@@ -92,8 +92,10 @@ its head mid-frame at t = 4k + 0.7, which helps when taking screenshots.
 Sky brightness: `SKY_DIM` / `SKY_DIM_TL` (`sky.glsl`, overall / top left corner; the
 water reflections are not dimmed). The main dials for the animation: `STAR_TWINKLE`
 (`sky.glsl`), `AUR_MOTION` (`aurora.glsl`, 0 = nearly static) and
-`METEOR_SLOT`/`METEOR_PROB` (`meteors.glsl`, rate). The boat: `BOAT_POS`, `BOAT_YAW` and
-`BOAT_LEN` (`boat.glsl`), its bobbing `BOAT_HEAVE`/`BOAT_PITCH`.
+`METEOR_SLOT`/`METEOR_PROB` (`meteors.glsl`, rate). The boat (`boat.glsl`): `BOAT_POS`, `BOAT_YAW`,
+`BOAT_LEN`/`BOAT_BEAM`/`BOAT_FREEBOARD`, the rowlocks `BOAT_LOCK_X`/`BOAT_LOCK_H`, the oars
+`BOAT_OAR_LEN`/`BOAT_OAR_SWEEP`/`BOAT_OAR_FEATHER`, how closely it follows the swells
+`BOAT_RIDE` (heave, pitch, roll) and its brightness `BOAT_ALBEDO`.
 
 ### justfile recipes
 
