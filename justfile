@@ -64,7 +64,7 @@ fix:
 #################################
 
 # Run all checks
-check: check-formatted lint check-tidy check-build
+check: check-formatted lint test-unit check-tidy check-build
 
 # Check if code is formatted (no git repo here, so treefmt checks itself)
 check-formatted:
@@ -78,6 +78,14 @@ check-tidy:
 check-build:
     go build -o /dev/null .
     go vet ./...
+
+#################################
+# Tests
+#################################
+
+# Run unit tests (no GL context needed)
+test-unit:
+    go test -race ./...
 
 #################################
 # Shader runner

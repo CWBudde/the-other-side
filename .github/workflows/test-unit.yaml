@@ -1,0 +1,31 @@
+name: test-unit
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  test-unit:
+    runs-on: ubuntu-latest
+    env:
+      GOFLAGS: -buildvcs=false
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Setup Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+
+      - name: Setup just
+        uses: extractions/setup-just@v3
+
+      # The runner links GLFW (cgo) even though the tests never open a window.
+      - name: Install GLFW build dependencies
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libgl1-mesa-dev xorg-dev
+
+      - name: Run unit tests
+        run: just test-unit

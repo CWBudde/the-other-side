@@ -12,6 +12,12 @@ import (
 // shader when -bufa is "auto".
 const bufferFile = "buffer_a.glsl"
 
+// -bufa modes besides an explicit path.
+const (
+	bufAuto = "auto"
+	bufNone = "none"
+)
+
 // pipeline is the Image pass, optionally fed by a Buffer A pass. Buffer A
 // renders into a half-float texture with a mip chain that is bound to
 // iChannel0 of the Image pass, like a Shadertoy Buffer A on iChannel0 with
@@ -64,9 +70,9 @@ func loadPass(path string, defs defineList) (*program, []string, error) {
 // if that file exists, "" or "none" disables the buffer pass.
 func bufferPath(opt *options) string {
 	switch opt.bufA {
-	case "", "none":
+	case "", bufNone:
 		return ""
-	case "auto":
+	case bufAuto:
 		path := filepath.Join(filepath.Dir(opt.shader), bufferFile)
 
 		_, err := os.Stat(path)

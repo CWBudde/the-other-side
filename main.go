@@ -69,7 +69,7 @@ func parseFlags() (*options, error) {
 	flag.DurationVar(&opt.bench, "bench", 0, "render offscreen for this long and report ms/frame, e.g. 3s")
 	flag.StringVar(&opt.bundle, "bundle", "",
 		"write the Shadertoy-pasteable Image pass to this file (and Buffer A to buffer_a.glsl beside it)")
-	flag.StringVar(&opt.bufA, "bufa", "auto",
+	flag.StringVar(&opt.bufA, "bufa", bufAuto,
 		`Buffer A shader feeding iChannel0 ("auto" = buffer_a.glsl beside -shader if present, "none")`)
 	flag.Parse()
 

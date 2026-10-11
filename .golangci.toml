@@ -25,7 +25,7 @@ json = 'camel'
 
 [linters.settings.varnamelen]
 # Short coordinate/size names are idiomatic in graphics code.
-ignore-names = ['ok', 'id', 'x', 'y', 'w', 'h', 'i', 'j', 't', 'x0', 'y0', 'x1', 'y1', 'dx', 'dy']
+ignore-names = ['ok', 'id', 'x', 'y', 'w', 'h', 'i', 'j', 't', 'x0', 'y0', 'x1', 'y1', 'dx', 'dy', 'tc']
 
 [linters.settings.wsl_v5]
 allow-first-in-block = true

@@ -1,2 +1,5 @@
 # render output (shots, montages, bundles)
 out/
+
+# Playwright MCP session artifacts
+.playwright-mcp/
