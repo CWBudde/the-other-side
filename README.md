@@ -14,7 +14,7 @@ It runs as two passes, like a Shadertoy with a buffer: Buffer A (`buffer_a.glsl`
 renders the scene in linear RGB, and the Image pass (`main.glsl`) blends in a soft glow
 built from Buffer A's mip chain, then tonemaps.
 
-**▶ [Try it online](https://meko-christian.github.io/the-other-side/)**: runs in any
+**▶ [Try it online](https://cwbudde.github.io/the-other-side/)**: runs in any
 browser with WebGL2 (`Space` pauses, `F` toggles fullscreen).
 
 ## Layout
@@ -156,7 +156,7 @@ out/insta`. `just bundle -D LOOP=30` gives the same loop for Shadertoy.
 
 ## Web version
 
-Live at <https://meko-christian.github.io/the-other-side/>. On every push to `main`,
+Live at <https://cwbudde.github.io/the-other-side/>. On every push to `main`,
 the Pages workflow bundles the shaders and publishes them with the small WebGL2 player
 in `web/`, which runs the same two passes as the Go runner (Buffer A in a half-float
 texture with mipmaps, then the Image pass). It renders at most 1080 lines and lowers
