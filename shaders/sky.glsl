@@ -64,12 +64,15 @@ const float STAR_TW_CHROMA = 0.4;      // colour flicker of low stars, relative 
 
 // Smooth 1D value noise for star twinkle: three independent channels in
 // [-0.5, 0.5], zero mean, lattice values hashed per star cell and tick.
-vec3 starNoise(ivec2 id, int salt, float t) {
+// period > 0 repeats the ticks every period ticks (t >= 0); 0 = no repeat.
+vec3 starNoise(ivec2 id, int salt, float t, int period) {
     float n = floor(t);
     float f = t - n;
     f = f * f * (3.0 - 2.0 * f);
-    int z = 0x100000 + salt + 8 * int(n); // clear of the position hashes
-    return mix(hash33i(ivec3(id, z)), hash33i(ivec3(id, z + 8)), f) - 0.5;
+    int i0 = int(n), i1 = i0 + 1;
+    if (period > 0) { i0 %= period; i1 %= period; }
+    int z = 0x100000 + salt; // clear of the position hashes
+    return mix(hash33i(ivec3(id, z + 8 * i0)), hash33i(ivec3(id, z + 8 * i1)), f) - 0.5;
 }
 
 // Gaussian star field on (azimuth, elevation) cells. rd must be normalized,
@@ -116,8 +119,18 @@ vec3 skyStars(vec3 rd, float az) {
 
         // Twinkle: n.x drives the brightness (normalized to unit sd), n.yz a
         // zero-sum colour flicker. Faint stars barely change.
-        float tt = iTime * STAR_TW_RATE * (0.7 + 0.6 * k.y) + 113.0 * k.z;
-        vec3 n = starNoise(ivec2(id), 2 * i + 1, tt) + STAR_TW_OCT2 * starNoise(ivec2(id), 2 * i + 2, 2.37 * tt);
+        float rate = STAR_TW_RATE * (0.7 + 0.6 * k.y);
+#if LOOP > 0
+        // whole numbers of ticks per loop, for both octaves
+        int p1 = int(round(rate * LOOP_T)), p2 = int(round(2.37 * rate * LOOP_T));
+        float tt = sceneTime() * float(p1) / LOOP_T + 113.0 * k.z;
+        float tt2 = sceneTime() * float(p2) / LOOP_T + 2.37 * 113.0 * k.z;
+#else
+        int p1 = 0, p2 = 0;
+        float tt = iTime * rate + 113.0 * k.z;
+        float tt2 = 2.37 * tt;
+#endif
+        vec3 n = starNoise(ivec2(id), 2 * i + 1, tt, p1) + STAR_TW_OCT2 * starNoise(ivec2(id), 2 * i + 2, tt2, p2);
         n *= 4.02 / sqrt(1.0 + STAR_TW_OCT2 * STAR_TW_OCT2); // 1 / sd of one octave
         float sig = twAmt * mix(STAR_TW_FAINT, 1.0, smoothstep(0.02, STAR_TW_BRIGHT, b * ext));
         b *= exp(sig * n.x - 0.5 * sig * sig);

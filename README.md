@@ -14,6 +14,9 @@ It runs as two passes, like a Shadertoy with a buffer: Buffer A (`buffer_a.glsl`
 renders the scene in linear RGB, and the Image pass (`main.glsl`) blends in a soft glow
 built from Buffer A's mip chain, then tonemaps.
 
+**▶ [Try it online](https://meko-christian.github.io/the-other-side/)**: runs in any
+browser with WebGL2 (`Space` pauses, `F` toggles fullscreen).
+
 ## Layout
 
 | Path                                                  | Content                                                               |
@@ -99,7 +102,7 @@ go run -buildvcs=false . -bundle out/shadertoy.glsl
 
 With `VIEW=2`, `-D AUR_DEBUG=1` shows the arc masks (red = main arc, green = second
 arc) and `-D AUR_DEBUG_ALPHA=1` shows the aurora coverage. Other overridable defines:
-`EXPOSURE`, `GLOW_MIX` (softening glow, 0 = off), `AURORA_STEPS` (direct view, default 40) and `AURORA_STEPS_REFL` (water
+`LOOP`, `FOCAL_LEN`, `HORIZON_Y`, `AUR_LIFT` (see [Looping clip](#looping-clip-instagram)), `METEOR_SEED`, `EXPOSURE`, `GLOW_MIX` (softening glow, 0 = off), `AURORA_STEPS` (direct view, default 40) and `AURORA_STEPS_REFL` (water
 reflections, default 12). `-D METEOR_FORCE=1` puts a meteor in every 4 s slot, with
 its head mid-frame at t = 4k + 0.7, which helps when taking screenshots.
 
@@ -118,6 +121,7 @@ water reflections are not dimmed). The main dials for the animation: `STAR_TWINK
 | `just run [args]`                                      | window mode with hot reload (also the default recipe)                     |
 | `just shot [times] [args]`                             | offscreen shots into `out/`                                               |
 | `just clip [start] [dur] [fps] [args]`                 | frame sequence into `out/clip/`, encoded as `out/clip.mp4` (needs ffmpeg) |
+| `just insta [loop] [fps] [args]`                       | seamless square loop (default 30 s), encoded as `out/insta.mp4`           |
 | `just sheet [dir] [every] [grid] [crop] [width] [out]` | contact sheet of every n-th frame, for judging motion                     |
 | `just compare REF [times] [args]`                      | shots plus `_cmp` montages against `REF` (e.g. an earlier render)         |
 | `just bench [dur] [args]`                              | benchmark at 1280x720 and 1920x1080                                       |
@@ -130,6 +134,25 @@ water reflections are not dimmed). The main dials for the animation: `STAR_TWINK
 | `just check`                                           | formatted, lint, `go mod tidy -diff`, build and vet                       |
 
 Extra runner flags can be appended, for example `just shot 0,10 -D VIEW=3`.
+
+## Looping clip (Instagram)
+
+`-D LOOP=n` (whole seconds) makes the animation repeat exactly every n seconds;
+without it the scene runs free as before. Every motion is adjusted to the loop:
+oscillations (swells, camera bob, aurora waves and shimmer) turn a whole number of
+cycles per loop, so their speeds change by a few percent, and the slowest ones (camera
+yaw, the arcs' slow wobble) stand still. Drifting noise (ripples, the crest warp, the
+aurora's brightness surges) is sampled at t and t - n and cross-faded over the loop,
+so the pattern moves at its usual speed and is back to the start at the loop point.
+The star twinkle and the meteor slots wrap their integer index once per loop
+(`-D METEOR_SEED=k` picks another set of meteors).
+
+`just insta` renders the 30 s loop at 1080x1080 (Instagram's square format), 30 fps,
+into `out/insta.mp4`. The square frame is reframed with `-D FOCAL_LEN=1.1 -D
+HORIZON_Y=0.38 -D AUR_LIFT=1.5` (defaults 1.5, 0.374 and 1): a somewhat wider lens,
+so the aurora arc still reaches the horizon near both edges, and arcs 1.5 times as
+high, so they fill the taller sky. The frames stay in `out/insta/` for `just sheet
+out/insta`. `just bundle -D LOOP=30` gives the same loop for Shadertoy.
 
 ## Web version
 

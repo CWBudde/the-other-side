@@ -17,11 +17,19 @@
 // floor, like the stars in sky.glsl: a bright head and an exponentially
 // fading tail whose length grows with the speed.
 //
+// Loop mode (LOOP > 0, common.glsl): the slot length is adjusted so a whole
+// number of slots fills the loop, and the slot index wraps once per loop, so
+// a meteor crossing the loop point continues after it. METEOR_SEED picks
+// another set of meteors.
+//
 // Shots: -D METEOR_FORCE=1 gives every slot a meteor whose head is at mid
 // frame, at full brightness, at t = k * METEOR_SLOT + 0.7 (k = 0, 1, 2, ...).
 
 #ifndef METEOR_FORCE
 #define METEOR_FORCE 0
+#endif
+#ifndef METEOR_SEED
+#define METEOR_SEED 0
 #endif
 
 // ---- tunables ---------------------------------------------------------------
@@ -62,20 +70,32 @@ vec3 meteors(vec3 rd) {
     float sigH = sig * METEOR_HEAD_W;
 
     vec3 col = vec3(0.0);
-    float slot0 = floor(iTime / METEOR_SLOT);
+#if LOOP > 0
+    int slots = max(int(floor(LOOP_T / METEOR_SLOT + 0.5)), 1); // not round(): x.5 rounds either way
+    float slotLen = LOOP_T / float(slots);
+#else
+    float slotLen = METEOR_SLOT;
+#endif
+    float time = sceneTime();
+    float slot0 = floor(time / slotLen);
     for (int i = 0; i < 2; i++) {
         float slot = slot0 - float(i);
-        vec3 h = hash33i(ivec3(int(slot), 4507, 21));
-        vec3 k = hash33i(ivec3(int(slot), 4507, 22));
-        vec3 m = hash33i(ivec3(int(slot), 4507, 23));
+#if LOOP > 0
+        int id = (int(slot) + slots) % slots; // the slot before the first is the last one
+#else
+        int id = int(slot);
+#endif
+        vec3 h = hash33i(ivec3(id, 4507 + METEOR_SEED, 21));
+        vec3 k = hash33i(ivec3(id, 4507 + METEOR_SEED, 22));
+        vec3 m = hash33i(ivec3(id, 4507 + METEOR_SEED, 23));
         float life = mix(METEOR_LIFE.x, METEOR_LIFE.y, m.y);
 #if METEOR_FORCE
-        float t0 = slot * METEOR_SLOT + 0.7 - 0.45 * life; // u = 0.45: head at mid frame
+        float t0 = slot * slotLen + 0.7 - 0.45 * life; // u = 0.45: head at mid frame
 #else
         if (h.x > METEOR_PROB) continue;
-        float t0 = slot * METEOR_SLOT + METEOR_SLOT * h.y;
+        float t0 = slot * slotLen + slotLen * h.y;
 #endif
-        float u = (iTime - t0) / life; // 0..1 over the crossing
+        float u = (time - t0) / life; // 0..1 over the crossing
         if (u <= 0.0 || u >= 1.0) continue;
 
         // End points: the slope is capped so the end stays above Y_MIN.
@@ -102,7 +122,7 @@ vec3 meteors(vec3 rd) {
         float env = smoothstep(0.0, METEOR_RISE, u)
                   * (1.0 - smoothstep(fade, min(fade + METEOR_FADE_LEN, 1.0), u))
                   * mix(0.8, 1.0, smoothstep(0.0, 0.5, u)); // brightens a little
-        float bri = METEOR_PEAK * mix(0.45, 1.0, hash12(vec2(slot, 4507.0))) * env * (ref / sig);
+        float bri = METEOR_PEAK * mix(0.45, 1.0, hash12(vec2(float(id), 4507.0 + float(METEOR_SEED)))) * env * (ref / sig);
         float head = exp(-(d * d + x * x) / (2.0 * sigH * sigH));
         float tail = exp(-x * x / (2.0 * sig * sig) - max(d, 0.0) / tl)
                    * smoothstep(-sig, sig, d) * smoothstep(0.0, 0.5 * tl, s);

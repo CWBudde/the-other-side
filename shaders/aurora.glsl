@@ -47,8 +47,12 @@
 // phi is constant along a view ray, so all per-arc terms are set up once per ray.
 // Debug: -D AUR_DEBUG=1 with VIEW=2 shows the lowest-layer masks (red = main arc,
 // green = second arc); -D AUR_DEBUG_ALPHA=1 with VIEW=2 shows the coverage.
-const vec4  AUR_ARC_A      = vec4(0.02, 0.50, 0.178, 0.020); // main arc: centre phi, half width (left), height, sheet half thickness
-const vec4  AUR_ARC_B      = vec4(0.0, 0.88, 0.126, 0.016);  // second arc (centre to the right horizon)
+// -D AUR_LIFT=x scales the height of both arcs (1 = as tuned for 16:9).
+#ifndef AUR_LIFT
+#define AUR_LIFT 1.0
+#endif
+const vec4  AUR_ARC_A      = vec4(0.02, 0.50, 0.178 * AUR_LIFT, 0.020); // main arc: centre phi, half width (left), height, sheet half thickness
+const vec4  AUR_ARC_B      = vec4(0.0, 0.88, 0.126 * AUR_LIFT, 0.016);  // second arc (centre to the right horizon)
 const vec2  AUR_SKEW       = vec2(0.95, 0.52);   // right half width / left half width (arc A, arc B)
 const vec2  AUR_FALL       = vec2(0.0, 2.8);    // arc shape (A, B): 0 = parabola, > 0 = steep top, long flat run-out
 const float AUR_FOOT       = 0.8;               // extra sheet thickness where an arc meets the horizon
@@ -109,7 +113,7 @@ float triNoise2d(vec2 p, float spd) {
     vec2 bp = p;
     for (float i = 0.0; i < 5.0; i++) {
         vec2 dg = aurTri2(bp * 1.85) * 0.75;
-        dg *= aurMm2(mod(iTime * spd, TAU)); // wrapped: sin / cos lose precision for large angles
+        dg *= aurMm2(mod(sceneTime() * spd, TAU)); // wrapped: sin / cos lose precision for large angles
         p -= dg / z2;
 
         bp *= 1.3;
@@ -130,8 +134,9 @@ float triNoise2d(vec2 p, float spd) {
 // then run out flat toward the horizon, e = h (1 - x^2) / (1 + fall x^2).
 // Returns the arc elevation e and 1 / (thickness measured along v), so the
 // per-sample profile is a single exp pair.
-// tm = motion time (t * AUR_MOTION), dir = travel direction of the waves (+-1).
-void aurArcSetup(float phi, vec4 arc, float skew, float fall, float t, float tm, float dir,
+// t = time of the slow undulation (offset per arc), tw = time of the waves
+// (the same for both arcs), dir = travel direction of the waves (+-1).
+void aurArcSetup(float phi, vec4 arc, float skew, float fall, float t, float tw, float dir,
                  out float e, out float invW) {
     float hw = arc.y * (phi > arc.x ? skew : 1.0);
     float x = (phi - arc.x) / hw;
@@ -139,10 +144,10 @@ void aurArcSetup(float phi, vec4 arc, float skew, float fall, float t, float tm,
     e = arc.z * (1.0 - x * x) * d;
     float slope = -2.0 * arc.z * x * (1.0 + fall) * d * d / hw;  // de/dphi
     // slow undulation along the arc
-    e += AUR_WOBBLE * (0.6 * sin(phi * 9.0 + t * AUR_DRIFT * 2.3) + 0.4 * sin(phi * 17.0 - t * AUR_DRIFT * 1.7 + 1.3));
+    e += AUR_WOBBLE * (0.6 * sin(phi * 9.0 + t * loopRate(AUR_DRIFT * 2.3)) + 0.4 * sin(phi * 17.0 - t * loopRate(AUR_DRIFT * 1.7) + 1.3));
     // travelling ripples: two wave trains running along the ribbon in direction
     // dir (phase speeds ~0.10 and ~0.075 rad/s, i.e. across the frame in ~10-14 s)
-    vec2 ph = vec2(7.0, 12.0) * phi - dir * mod(AUR_WAVE_RATE * tm, TAU) + vec2(0.7, 2.9) * dir;
+    vec2 ph = vec2(7.0, 12.0) * phi - dir * mod(loopRate(AUR_WAVE_RATE * AUR_MOTION) * tw, TAU) + vec2(0.7, 2.9) * dir;
     float wa = AUR_WAVE * AUR_MOTION;
     e += wa * (0.6 * sin(ph.x) + 0.4 * sin(ph.y));
     slope += wa * (0.6 * 7.0 * cos(ph.x) + 0.4 * 12.0 * cos(ph.y));
@@ -152,6 +157,26 @@ void aurArcSetup(float phi, vec4 arc, float skew, float fall, float t, float tm,
     // perpendicular distance, so the ribbon keeps its thickness where the arc
     // runs steeply down to the horizon
     invW = 1.0 / (w * sqrt(1.0 + slope * slope));
+}
+
+// Brightness surge pattern along an arc at time t, in [0, 1]: two octaves of
+// value noise that drift along the arc (direction dir) and change in place.
+// c0 = (azimuth frequency, extra drift factor, row) of the coarse octave,
+// c1 = (azimuth frequency, row) of the fine one.
+float aurSurgeAt(float phi, float t, float dir, vec3 c0, vec2 c1) {
+    float tm = t * AUR_MOTION;
+    return mix(noise(vec2(phi * c0.x + dir * (t * AUR_DRIFT * c0.y - tm * AUR_SURGE.x), c0.z + tm * AUR_SURGE.y)),
+               noise(vec2(phi * c1.x - dir * tm * AUR_SURGE.x * 1.7, c1.y + tm * AUR_SURGE.y * 1.6)), AUR_SURGE_OCT);
+}
+
+// The surge pattern, in loop mode cross-faded with its copy one loop earlier.
+float aurSurge(float phi, float t, float dir, vec3 c0, vec2 c1) {
+    float s = aurSurgeAt(phi, t, dir, c0, c1);
+#if LOOP > 0
+    float a = loopMix();
+    s = 0.5 + (mix(s, aurSurgeAt(phi, t - LOOP_T, dir, c0, c1), a) - 0.5) * loopNorm(a);
+#endif
+    return s;
 }
 
 // Sheet core plus a wide soft halo; y = offset in sheet thicknesses.
@@ -165,18 +190,15 @@ vec4 aurora(vec3 ro, vec3 rd, int steps) {
     if (rd.y <= 0.0) return vec4(0.0);
 
     // ---- per-ray band setup ------------------------------------------------
-    float t = iTime;
-    float tm = t * AUR_MOTION;
+    float t = sceneTime();
     float phi = atan(rd.x, rd.z);
     float eA, iwA, eB, iwB;
-    aurArcSetup(phi, AUR_ARC_A, AUR_SKEW.x, AUR_FALL.x, t, tm, 1.0, eA, iwA);
-    aurArcSetup(phi, AUR_ARC_B, AUR_SKEW.y, AUR_FALL.y, t + 50.0, tm, -1.0, eB, iwB);
+    aurArcSetup(phi, AUR_ARC_A, AUR_SKEW.x, AUR_FALL.x, t, t, 1.0, eA, iwA);
+    aurArcSetup(phi, AUR_ARC_B, AUR_SKEW.y, AUR_FALL.y, t + 50.0, t, -1.0, eB, iwB);
     // brightness surges: patches that travel along each arc (A to the right,
     // B to the left) and brighten / fade in place over a few seconds
-    float sA = mix(noise(vec2(phi * 4.0 + t * AUR_DRIFT * 0.4 - tm * AUR_SURGE.x, 3.1 + tm * AUR_SURGE.y)),
-                   noise(vec2(phi * 9.0 - tm * AUR_SURGE.x * 1.7, 13.7 + tm * AUR_SURGE.y * 1.6)), AUR_SURGE_OCT);
-    float sB = mix(noise(vec2(phi * 5.0 - t * AUR_DRIFT * 0.3 + tm * AUR_SURGE.x, 7.3 + tm * AUR_SURGE.y)),
-                   noise(vec2(phi * 10.0 + tm * AUR_SURGE.x * 1.7, 21.1 + tm * AUR_SURGE.y * 1.6)), AUR_SURGE_OCT);
+    float sA = aurSurge(phi, t, 1.0, vec3(4.0, 0.4, 3.1), vec2(9.0, 13.7));
+    float sB = aurSurge(phi, t, -1.0, vec3(5.0, 0.3, 7.3), vec2(10.0, 21.1));
     // main arc: strongest on the left and in the centre, fainter to the right
     float gA = mix(0.4, 0.7, smoothstep(0.42, 0.1, phi));
     gA *= 0.55 + 0.45 * sA;
@@ -228,10 +250,20 @@ vec4 aurora(vec3 ro, vec3 rd, int steps) {
     // per arc needs a shear across the layers or across v, which drags the
     // texture into fibres even when small; the arcs differ by their waves and
     // surges instead.
-    float spd = mix(0.06, AUR_SHIMMER, AUR_MOTION);
-    float drift = AUR_MOTION * (AUR_SLIDE.x + AUR_SLIDE.y * sin(mod(AUR_SLIDE.z * tm, TAU)));
+    float spd = loopRate(mix(0.06, AUR_SHIMMER, AUR_MOTION));
+    // In loop mode the slow common slide swings once per loop, with its swing
+    // scaled down so that its peak speed stays the same.
+    float slRate = AUR_SLIDE.z * AUR_MOTION;
+#if LOOP > 0
+    float slRateL = TAU / LOOP_T * max(round(slRate * LOOP_T / TAU), 1.0);
+    float slSwing = AUR_SLIDE.y * slRate / slRateL;
+    slRate = slRateL;
+#else
+    float slSwing = AUR_SLIDE.y;
+#endif
+    float drift = AUR_MOTION * (AUR_SLIDE.x + slSwing * sin(mod(slRate * t, TAU)));
     vec2 slVar = AUR_SLIDE_VAR * AUR_MOTION;
-    vec2 slPh = mod(AUR_SLIDE_RATE * tm, TAU) + vec2(2.0, 3.5) * phi + vec2(0.0, 1.7);
+    vec2 slPh = mod(loopRate(AUR_SLIDE_RATE * AUR_MOTION) * t, TAU) + vec2(2.0, 3.5) * phi + vec2(0.0, 1.7);
     vec2 sl0 = slVar * sin(slPh);
     float ds = drift + sl0.x + sl0.y;
     float phiT = phi + ds;

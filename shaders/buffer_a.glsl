@@ -46,10 +46,11 @@ vec3 boatCam(vec3 col, vec3 ro, vec3 rd) {
 // Level camera with a shifted lens: rd.y = 0 (the horizon) lands at HORIZON
 // of the frame height without tilting the view.
 void camera(vec2 fragCoord, out vec3 ro, out vec3 rd) {
-    ro = vec3(0.0, CAM_HEIGHT + 0.02 * sin(iTime * 0.4), 0.0);
+    float t = sceneTime();
+    ro = vec3(0.0, CAM_HEIGHT + 0.02 * sin(t * loopRate(0.4)), 0.0);
     vec2 uv = (fragCoord - vec2(0.5 * iResolution.x, HORIZON * iResolution.y)) / iResolution.y;
     rd = normalize(vec3(uv, FOCAL));
-    rd.xz = rot(0.02 * sin(iTime * 0.05)) * rd.xz; // slow yaw drift keeps the horizon level
+    rd.xz = rot(0.02 * sin(t * loopRate(0.05))) * rd.xz; // slow yaw drift keeps the horizon level
 }
 
 void mainImage(out vec4 fragColor, in vec2 fragCoord) {

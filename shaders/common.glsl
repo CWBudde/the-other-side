@@ -8,9 +8,62 @@
 #define TAU 6.28318530718
 
 // ---- camera / framing -------------------------------------------------------
-const float CAM_HEIGHT = 1.2;   // eye height above the water plane (y = 0)
-const float HORIZON    = 0.374; // horizon height as a fraction of the frame, from the bottom
-const float FOCAL      = 1.5;   // focal length in frame heights (larger = narrower FOV)
+// HORIZON and FOCAL can be overridden (-D HORIZON_Y=..., -D FOCAL_LEN=...) for
+// other aspect ratios: a square frame keeps the horizontal field of view of
+// the 16:9 one with FOCAL_LEN = 1.5 * 9 / 16.
+#ifndef HORIZON_Y
+#define HORIZON_Y 0.374
+#endif
+#ifndef FOCAL_LEN
+#define FOCAL_LEN 1.5
+#endif
+const float CAM_HEIGHT = 1.2;       // eye height above the water plane (y = 0)
+const float HORIZON    = HORIZON_Y; // horizon height as a fraction of the frame, from the bottom
+const float FOCAL      = FOCAL_LEN; // focal length in frame heights (larger = narrower FOV)
+
+// ---- loop mode --------------------------------------------------------------
+// -D LOOP=n (whole seconds) makes the animation repeat exactly every n seconds,
+// for a seamless looping clip. Every motion is adjusted to the loop:
+//   - oscillations turn a whole number of cycles per loop (loopRate); the very
+//     slow ones (under half a cycle) stand still
+//   - drifting noise is sampled at t and t - LOOP and cross-faded (loopMix,
+//     loopNorm): both copies drift at the same speed, so the blend still reads
+//     as one drifting field, and at the loop point it is back to the start
+//   - time-lattice noise (star twinkle) and the meteor slots wrap their
+//     integer index once per loop
+// LOOP = 0 (default) leaves the free-running animation untouched.
+#ifndef LOOP
+#define LOOP 0
+#endif
+const float LOOP_T = float(LOOP);
+
+// Animation time: iTime, wrapped into [0, LOOP) in loop mode.
+float sceneTime() {
+#if LOOP > 0
+    return mod(iTime, LOOP_T);
+#else
+    return iTime;
+#endif
+}
+
+// Angular rate w (rad/s), in loop mode rounded to a whole number of cycles
+// per loop, so that sin(w * sceneTime()) repeats with the loop.
+float loopRate(float w) {
+#if LOOP > 0
+    return round(w * LOOP_T / TAU) * TAU / LOOP_T;
+#else
+    return w;
+#endif
+}
+vec2 loopRate(vec2 w) { return vec2(loopRate(w.x), loopRate(w.y)); }
+
+// Cross-fade weight of the copy sampled at sceneTime() - LOOP: 0 at the start
+// of the loop, 1 at its end, with zero slope at both ends so the speed does
+// not jump at the loop point.
+float loopMix() { return smoothstep(0.0, LOOP_T, sceneTime()); }
+// Gain that keeps the contrast of a blend of two independent zero-mean noise
+// samples, (1 - a) n1 + a n2, at that of a single one.
+float loopNorm(float a) { return inversesqrt((1.0 - a) * (1.0 - a) + a * a); }
 
 // ---- quality ----------------------------------------------------------------
 #ifndef AURORA_STEPS

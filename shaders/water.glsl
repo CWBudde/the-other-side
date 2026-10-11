@@ -102,11 +102,24 @@ float waterFilter(vec2 kv, vec2 v, vec2 fp) {
     return exp(-0.5 * dot(s, s));
 }
 
+// Crest-bending warp noise at xz (value, gradient in noise units), drifting
+// slowly in z; t = sceneTime() * WATER_TIME_SCALE.
+vec3 waterWarp(vec2 xz, float t) {
+    vec2 p = xz * WATER_WARP_SCALE;
+    vec3 w = waterNoised(p + vec2(0.0, t * 0.01));
+#if LOOP > 0
+    float a = loopMix();
+    vec3 w2 = waterNoised(p + vec2(0.0, (t - LOOP_T * WATER_TIME_SCALE) * 0.01));
+    w = mix(w, w2, a) * loopNorm(a);
+#endif
+    return w;
+}
+
 // Height-field gradient at xz (.xy) plus the slope variance removed by
 // filtering (.z) and the total slope variance of the spectrum (.w).
 // gRipple receives the ripple part of the gradient on its own.
 vec4 waterGradient(vec2 xz, float dist, out vec2 gRipple) {
-    float t = iTime * WATER_TIME_SCALE;
+    float t = sceneTime() * WATER_TIME_SCALE;
 
     // Pixel footprint on the water plane.
     float fpAcross = dist / (FOCAL * iResolution.y);
@@ -120,7 +133,7 @@ vec4 waterGradient(vec2 xz, float dist, out vec2 gRipple) {
     float varAll = 0.0;
 
     // Low-frequency warp that bends the swell crests (shared by all swells).
-    vec3 w = waterNoised(xz * WATER_WARP_SCALE + vec2(0.0, t * 0.01));
+    vec3 w = waterWarp(xz, t);
     float warp = WATER_WARP_AMOUNT * w.x;
     vec2 dWarp = WATER_WARP_AMOUNT * WATER_WARP_SCALE * w.yz;
 
@@ -132,10 +145,10 @@ vec4 waterGradient(vec2 xz, float dist, out vec2 gRipple) {
         float ang = WATER_SWELL_ANGLE + (hash11(fi * 7.31 + 1.7) - 0.5) * 2.0 * WATER_SWELL_SPREAD;
         vec2 dir = vec2(sin(ang), -cos(ang)); // travel toward the camera (-z)
         float k = TAU / lambda;
-        float omega = sqrt(9.81 * k);
+        float omega = loopRate(sqrt(9.81 * k) * WATER_TIME_SCALE); // per second of sceneTime()
         vec2 kv = dir * k;
         // Warp scales with wavelength so short swells are not over-bent.
-        float ph = dot(kv, xz) - omega * t + hash11(fi * 3.17 + 0.3) * TAU + warp * (lambda / WATER_SWELL_LAMBDA + 0.3);
+        float ph = dot(kv, xz) - omega * sceneTime() + hash11(fi * 3.17 + 0.3) * TAU + warp * (lambda / WATER_SWELL_LAMBDA + 0.3);
         vec2 dph = kv + dWarp * (lambda / WATER_SWELL_LAMBDA + 0.3);
         float att = waterFilter(dph, v, fp);
         float a = slope / k; // height amplitude
@@ -157,10 +170,17 @@ vec4 waterGradient(vec2 xz, float dist, out vec2 gRipple) {
     vec2 drift = WATER_RIPPLE_DRIFT;
     mat2 r = mat2(1.0);
     gRipple = vec2(0.0);
+#if LOOP > 0
+    float la = loopMix(), ln = loopNorm(la);
+#endif
     for (int i = 0; i < WATER_RIPPLE_OCTAVES; i++) {
         // noise coordinate q = freq * (R * xz) + offset ; dq/dxz = diag(freq) * R
         vec2 rxz = r * xz;
         vec3 n = waterNoised(rxz * freq + drift * freq * t + float(i) * 31.7);
+#if LOOP > 0
+        vec3 n2 = waterNoised(rxz * freq + drift * freq * (t - LOOP_T * WATER_TIME_SCALE) + float(i) * 31.7);
+        n = mix(n, n2, la) * ln;
+#endif
         vec2 gq = n.yz * freq;          // gradient w.r.t. the rotated coords
         vec2 g = gq * r;                // back to world: R^T * gq
         // Representative wave vector of this octave: about pi rad per noise cell.
@@ -185,12 +205,12 @@ vec4 waterGradient(vec2 xz, float dist, out vec2 gRipple) {
 // a flat plane with these slopes; the boat floats on this height and is cut
 // off by it at the waterline.
 float waterSwellHeight(vec2 xz) {
-    float t = iTime * WATER_TIME_SCALE;
+    float t = sceneTime() * WATER_TIME_SCALE;
     float q = max(WATER_SWELL_SHARP, 1e-3);
     // Mean of exp(q * (sin - 1)) over a period: exp(-q) * I0(q).
     float q2 = 0.25 * q * q;
     float mean = exp(-q) * (1.0 + q2 + q2 * q2 / 4.0 + q2 * q2 * q2 / 36.0);
-    float warp = WATER_WARP_AMOUNT * waterNoised(xz * WATER_WARP_SCALE + vec2(0.0, t * 0.01)).x;
+    float warp = WATER_WARP_AMOUNT * waterWarp(xz, t).x;
     float lambda = WATER_SWELL_LAMBDA;
     float slope = WATER_SWELL_SLOPE;
     float h = 0.0;
@@ -198,7 +218,7 @@ float waterSwellHeight(vec2 xz) {
         float fi = float(i);
         float ang = WATER_SWELL_ANGLE + (hash11(fi * 7.31 + 1.7) - 0.5) * 2.0 * WATER_SWELL_SPREAD;
         float k = TAU / lambda;
-        float ph = dot(vec2(sin(ang), -cos(ang)) * k, xz) - sqrt(9.81 * k) * t
+        float ph = dot(vec2(sin(ang), -cos(ang)) * k, xz) - loopRate(sqrt(9.81 * k) * WATER_TIME_SCALE) * sceneTime()
                  + hash11(fi * 3.17 + 0.3) * TAU + warp * (lambda / WATER_SWELL_LAMBDA + 0.3);
         h += slope / k / q * (exp(q * (sin(ph) - 1.0)) - mean);
         lambda *= WATER_SWELL_DECAY;

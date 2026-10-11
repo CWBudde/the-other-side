@@ -110,6 +110,13 @@ clip start="0" dur="12" fps="30" *args:
     ffmpeg -loglevel error -y -framerate {{fps}} -i out/clip/f_%05d.png -c:v libx264 -pix_fmt yuv420p -crf 16 out/clip.mp4
     @echo "wrote out/clip.mp4"
 
+# Seamless square loop for Instagram (loop = whole seconds): frames into out/insta/, encoded as out/insta.mp4
+insta loop="30" fps="30" *args:
+    rm -rf out/insta && mkdir -p out/insta
+    go run . -size 1080x1080 -D LOOP={{loop}} -D FOCAL_LEN=1.1 -D HORIZON_Y=0.38 -D AUR_LIFT=1.5 -shot out/insta/f.png -time 0 -fps {{fps}} -frames $(({{loop}} * {{fps}})) {{args}}
+    ffmpeg -loglevel error -y -framerate {{fps}} -i out/insta/f_%05d.png -c:v libx264 -preset slow -profile:v high -pix_fmt yuv420p -crf 17 -movflags +faststart out/insta.mp4
+    @echo "wrote out/insta.mp4"
+
 # Contact sheet of every n-th frame of a frame sequence (crop = ffmpeg crop w:h:x:y)
 sheet dir="out/clip" every="15" grid="4x4" crop="iw:ih:0:0" width="480" out="out/sheet.png":
     ffmpeg -loglevel error -y -i {{dir}}/f_%05d.png -vf "select='not(mod(n\,{{every}}))',crop={{crop}},scale={{width}}:-1,tile={{grid}}:padding=4" -frames:v 1 {{out}}
