@@ -4,6 +4,7 @@
 //   0 full composite   1 sky only (skyBase)   2 aurora only
 //   3 water only       4 water normals (red = x slope, green = z slope)
 //   5 meteors only (shooting stars; -D METEOR_FORCE=1 puts one in every slot)
+//   6 full composite with the boat in red (look-dev; its reflection shows dim red)
 #ifndef VIEW
 #define VIEW 0
 #endif
@@ -16,6 +17,7 @@
 #include "sky.glsl"
 #include "aurora.glsl"
 #include "meteors.glsl"
+#include "boat.glsl"
 
 vec3 skyFull(vec3 rd, int steps) {
     vec4 a = aurora(gCamPos, rd, steps);
@@ -35,6 +37,14 @@ vec3 skyRefl(vec3 rd, vec3 rdAur, int steps) {
 }
 
 #include "water.glsl"
+
+// Coverage of the boat for a camera ray. Below the horizon the card only
+// counts in front of the sea hit, which cuts the hull off at the waterline.
+float boatCam(vec3 ro, vec3 rd) {
+    float t;
+    float c = boatCover(ro, rd, 1.0 / (iResolution.y * FOCAL), 0.0, t);
+    return (rd.y < 0.0 && t > -ro.y / rd.y) ? 0.0 : c;
+}
 
 // Level camera with a shifted lens: rd.y = 0 (the horizon) lands at HORIZON
 // of the frame height without tilting the view.
@@ -66,15 +76,16 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
     bool isSky = rd.y > 0.0;
     vec3 col = vec3(0.0);
 
-#if VIEW == 0
+#if VIEW == 0 || VIEW == 6
     if (isSky) col = skyFull(rd);
     else       col = water(ro, rd);
+    col = mix(col, BOAT_COL, boatCam(ro, rd));
 #elif VIEW == 1
     if (isSky) col = skyBase(rd);
 #elif VIEW == 2
     if (isSky) col = aurora(ro, rd, AURORA_STEPS).rgb;
 #elif VIEW == 3
-    if (!isSky) col = water(ro, rd);
+    if (!isSky) col = mix(water(ro, rd), BOAT_COL, boatCam(ro, rd));
 #elif VIEW == 4
     if (!isSky) {
         float t = -ro.y / rd.y;

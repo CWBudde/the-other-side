@@ -3,7 +3,8 @@
 // Contracts:
 //   vec3 water(vec3 ro, vec3 rd)            -> linear RGB, caller guarantees rd.y < 0
 //   vec3 waterNormal(vec2 xz, float dist)   -> unit normal (used by VIEW 4)
-// Reflections call skyRefl(dir, dirAurora, AURORA_STEPS_REFL), defined in main.glsl.
+// Reflections call skyRefl(dir, dirAurora, AURORA_STEPS_REFL), defined in main.glsl,
+// and boatCover (boat.glsl) for the reflection of the boat.
 //
 // Approach: analytic ray/plane hit at y = 0 (no raymarching). The surface is a
 // height field whose gradient is evaluated analytically:
@@ -226,5 +227,11 @@ vec3 water(vec3 ro, vec3 rd) {
     float far = 1.0 - exp(-t / WATER_TINT_DIST);
     vec3 tint = mix(WATER_TINT, vec3(1.0), far * far);
     vec3 refl = skyRefl(r, rA, AURORA_STEPS_REFL) * tint * WATER_REFL_GAIN * near;
+    // The boat in the water: its reflection follows the wavy normal, so it
+    // breaks up on the swells. The edge width covers the camera-to-surface
+    // part of the path as well.
+    float pa = 1.0 / (iResolution.y * FOCAL), tb;
+    float boat = boatCover(p, r, pa, t * pa + BOAT_REFL_BLUR, tb);
+    refl = mix(refl, BOAT_COL, boat);
     return mix(WATER_BODY, refl, fres);
 }

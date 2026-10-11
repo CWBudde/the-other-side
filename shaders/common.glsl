@@ -24,7 +24,7 @@ const float AURORA_REFL_GAIN = 0.3; // aurora strength in water reflections (haz
 // Camera position for the current pixel; mainImage sets it before shading.
 vec3 gCamPos = vec3(0.0, CAM_HEIGHT, 0.0);
 
-// ---- layer contracts (defined in sky.glsl, aurora.glsl, main.glsl, water.glsl)
+// ---- layer contracts (defined in sky.glsl, aurora.glsl, main.glsl, water.glsl, boat.glsl)
 vec3 skyBase(vec3 rd);                    // sky gradient + haze + stars, no aurora
 vec3 skyBase(vec3 rd, float starGain);    // same with the stars scaled (0 = none), not dimmed
 vec4 aurora(vec3 ro, vec3 rd, int steps); // premultiplied rgb + alpha
@@ -33,6 +33,7 @@ vec3 skyFull(vec3 rd, int steps);         // same with an explicit aurora step c
 vec3 skyRefl(vec3 rd, vec3 rdAur, int steps); // reflection variant, aurora along rdAur, dimmed
 vec3 water(vec3 ro, vec3 rd);             // shaded water for a ray with rd.y < 0
 vec3 waterNormal(vec2 xz, float dist);    // water surface normal at xz, seen from dist
+float boatCover(vec3 ro, vec3 rd, float footprint, float soft, out float t); // boat coverage along a ray
 
 // ---- math -------------------------------------------------------------------
 mat2 rot(float a) {
