@@ -48,33 +48,40 @@ func (s *source) append(o *source) {
 var includeRe = regexp.MustCompile(`^\s*#\s*include\s+"([^"]+)"`)
 
 // loadShader reads path and recursively inlines `#include "file"` directives.
-// Include paths are relative to the including file. Each file is included at
-// most once (pragma-once semantics), which also makes include cycles harmless.
-// On error the returned source still lists the files read so far, so the
-// caller can keep watching them for changes.
+// Include paths are relative to the including file and must stay inside the
+// directory of the main shader; files are read through an os.Root, so an
+// include cannot escape it (neither via ".." nor via symlinks). Each file is
+// included at most once (pragma-once semantics), which also makes include
+// cycles harmless. On error the returned source still lists the files read so
+// far, so the caller can keep watching them for changes.
 func loadShader(path string) (*source, error) {
-	s := &source{}
-	seen := map[string]bool{}
-	err := s.include(path, seen)
+	src := &source{}
+	dir, name := filepath.Split(path)
 
-	return s, err
+	root, err := os.OpenRoot(filepath.Clean(dir))
+	if err != nil {
+		return src, err
+	}
+	defer root.Close()
+
+	err = src.include(root, dir, name, map[string]bool{})
+
+	return src, err
 }
 
-func (s *source) include(path string, seen map[string]bool) error {
-	abs, err := filepath.Abs(path)
-	if err != nil {
-		return err
-	}
-
-	if seen[abs] {
+// include inlines the file rel (relative to root, whose path is dir).
+func (s *source) include(root *os.Root, dir, rel string, seen map[string]bool) error {
+	rel = filepath.Clean(rel)
+	if seen[rel] {
 		return nil
 	}
 
-	seen[abs] = true
+	seen[rel] = true
 
+	path := filepath.Join(dir, rel)
 	s.files = append(s.files, path)
 
-	data, err := os.ReadFile(path) //nolint:gosec // G703: reading user-chosen shader files is the purpose
+	data, err := root.ReadFile(rel)
 	if err != nil {
 		return err
 	}
@@ -87,9 +94,9 @@ func (s *source) include(path string, seen map[string]bool) error {
 			continue
 		}
 
-		inc := filepath.Join(filepath.Dir(path), match[1])
+		inc := filepath.Join(filepath.Dir(rel), match[1])
 
-		err := s.include(inc, seen)
+		err := s.include(root, dir, inc, seen)
 		if err != nil {
 			return fmt.Errorf("%s:%d: include %q: %w", path, i+1, match[1], err)
 		}

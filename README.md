@@ -53,6 +53,9 @@ changes. If the new version fails to compile, the error log is printed with `fil
 and the old image keeps rendering. Keys: `Space` pauses, `P` saves a PNG, `Esc` quits.
 `iMouse` follows Shadertoy conventions.
 
+`#include "file"` paths are relative to the including file and must stay inside the
+directory of the main shader (they are read through an `os.Root`).
+
 Examples:
 
 ```sh
